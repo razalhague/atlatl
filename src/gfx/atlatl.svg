@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   xmlns:dc="http://purl.org/dc/elements/1.1/"
+   xmlns:cc="http://creativecommons.org/ns#"
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   width="750"
+   height="750"
+   id="svg2"
+   version="1.1"
+   inkscape:version="0.48.4 r9939"
+   inkscape:export-filename="C:\Users\Ville\Documents\atlatl.png"
+   inkscape:export-xdpi="1.92"
+   inkscape:export-ydpi="1.92"
+   sodipodi:docname="Atlatl icon">
+  <defs
+     id="defs4" />
+  <sodipodi:namedview
+     id="base"
+     pagecolor="#ffffff"
+     bordercolor="#666666"
+     borderopacity="1.0"
+     inkscape:pageopacity="0.0"
+     inkscape:pageshadow="2"
+     inkscape:zoom="0.7"
+     inkscape:cx="178.96093"
+     inkscape:cy="510.6394"
+     inkscape:document-units="px"
+     inkscape:current-layer="layer1"
+     showgrid="false"
+     inkscape:window-width="1920"
+     inkscape:window-height="1012"
+     inkscape:window-x="-8"
+     inkscape:window-y="-8"
+     inkscape:window-maximized="1" />
+  <metadata
+     id="metadata7">
+    <rdf:RDF>
+      <cc:Work
+         rdf:about="">
+        <dc:format>image/svg+xml</dc:format>
+        <dc:type
+           rdf:resource="http://purl.org/dc/dcmitype/StillImage" />
+        <dc:title></dc:title>
+      </cc:Work>
+    </rdf:RDF>
+  </metadata>
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1"
+     transform="translate(0,-302.36218)">
+    <g
+       id="g3870"
+       transform="translate(-10,-8.5714285)">
+      <rect
+         transform="matrix(0.7071118,-0.70710176,0.7071118,0.70710176,0,0)"
+         y="677.39075"
+         x="-215.93599"
+         height="526.55334"
+         width="30.74464"
+         id="rect3012"
+         style="fill:#66023c;fill-opacity:1;stroke:#6d560d;stroke-width:44.36865997;stroke-linejoin:round;stroke-miterlimit:4;stroke-opacity:1;stroke-dasharray:none" />
+      <rect
+         transform="matrix(-0.26132278,-0.96525147,0.96525334,0.26131587,0,0)"
+         ry="0"
+         y="-26.690701"
+         x="-612.08728"
+         height="235.84717"
+         width="235.84427"
+         id="rect3782"
+         style="fill:#d6eaea;fill-opacity:1;stroke:#30414f;stroke-width:64.58353424;stroke-linecap:butt;stroke-linejoin:round;stroke-miterlimit:4;stroke-opacity:1;stroke-dasharray:none;stroke-dashoffset:0" />
+      <g
+         style="stroke:#4a422b;stroke-opacity:1"
+         transform="translate(542.85714,127.14286)"
+         id="g3866">
+        <rect
+           style="fill:#66023c;fill-opacity:1;stroke:#4a422b;stroke-width:45.58064651;stroke-linejoin:round;stroke-miterlimit:4;stroke-opacity:1;stroke-dasharray:none"
+           id="rect3012-1"
+           width="24.536381"
+           height="696.32123"
+           x="-825.1062"
+           y="-305.48447"
+           transform="matrix(0.25883041,-0.96592278,0.96592693,0.25881491,0,0)" />
+        <rect
+           style="fill:#66023c;fill-opacity:1;stroke:#4a422b;stroke-width:60;stroke-linejoin:round;stroke-miterlimit:4;stroke-opacity:1;stroke-dasharray:none"
+           id="rect3012-1-6"
+           width="44.660316"
+           height="119.30499"
+           x="-818.00623"
+           y="280.73605"
+           transform="matrix(0.25882011,-0.96592554,0.96593759,0.25877513,0,0)" />
+      </g>
+    </g>
+  </g>
+</svg>
