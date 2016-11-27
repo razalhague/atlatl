@@ -1,0 +1,15 @@
+{
+	"killSound": "kill.wav",
+	"alarmSound": "alarm.wav",
+	"alarmThresholdMinutes": 10.0,
+	"refreshMinutes": 1.0,
+	"groups": [
+		{
+			"name": "Games",
+			"dailyMinutes": 60.0,
+			"processNames": [
+				"RocketLeague.exe",
+			]
+		}
+	]
+}
