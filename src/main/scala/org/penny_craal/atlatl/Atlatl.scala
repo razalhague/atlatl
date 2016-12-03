@@ -56,7 +56,7 @@ object Atlatl {
           0 < timeLeft && timeLeft <= alarmThresholdMinutes && anyAppsRunningFromGroup(groupName)
         }
       val trayTooltip = updatedGroupTimes map { case (groupName, spentTime) =>
-        groupName + ": " + spentTime + "/" + appGroups(groupName).dailyMinutes + "\n"
+        s"$groupName: $spentTime/${appGroups(groupName).dailyMinutes}\n"
       } reduce (_ + _)
 
       updateTrayIconTooltip(trayTooltip)
