@@ -31,13 +31,14 @@ object Atlatl {
   }
 
   private def run(conf: String): Unit = {
-    val (appGroups, killSound, alarmSound, alarmThresholdMinutes, refreshMinutes) = parseConfig(conf)
+    val (appGroupList, killSound, alarmSound, alarmThresholdMinutes, refreshMinutes) = parseConfig(conf)
+    val appGroups = Map(appGroupList map (appGroup => (appGroup.name, appGroup)): _*)
     setupAudioSystem(List(alarmSound, killSound))
     setupTrayIcon()
 
     def loop(groupTimes: Map[String, Double], appsFromLastRefresh: Iterable[ProcessInfo]): Unit = {
       val apps = for {
-        appGroup <- appGroups.values
+        appGroup <- appGroupList
         pi <- fetchRunningProcesses() if appGroup.processNames contains pi.getName
       } yield pi
       val appsInCommon = for {
@@ -72,7 +73,7 @@ object Atlatl {
       loop(updatedGroupTimes, apps)
     }
 
-    loop(appGroups map { case (_, appGroup) => (appGroup.name, 0.0) }, Seq())
+    loop(Map(appGroupList map (appGroup => (appGroup.name, 0.0)): _*), Seq())
   }
 
   private def readConfig(): Try[String] = {
@@ -86,7 +87,7 @@ object Atlatl {
     }
   }
 
-  private def parseConfig(jsonText: String): (Map[String, AppGroup], String, String, Double, Double) = {
+  private def parseConfig(jsonText: String): (Seq[AppGroup], String, String, Double, Double) = {
     // TODO: extract json field names into constants
     // TODO: find native scala json library?
     val configJson = JSONValue.parse(jsonText).asInstanceOf[JSONObject]
@@ -98,7 +99,7 @@ object Atlatl {
       )
     )
     (
-      Map(appGroups.toSeq map (appGroup => (appGroup.name, appGroup)): _*),
+      appGroups.toSeq,
       configJson.get("killSound").asInstanceOf[String],
       configJson.get("alarmSound").asInstanceOf[String],
       configJson.get("alarmThresholdMinutes").asInstanceOf[Double],
@@ -106,7 +107,7 @@ object Atlatl {
     )
   }
 
-  private def fetchRunningProcesses(): Iterable[ProcessInfo] = {
+  private def fetchRunningProcesses(): Seq[ProcessInfo] = {
     JProcesses.getProcessList.asScala
   }
 
