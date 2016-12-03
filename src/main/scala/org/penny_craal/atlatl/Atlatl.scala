@@ -20,7 +20,9 @@ object Atlatl {
   val configFileName = "config.json"
   val trayIconFileName = "atlatl.png"
 
+  /** Maps filename to Clip */
   private val sounds = scala.collection.mutable.Map[String, Clip]()
+
   private var trayIcon: TrayIcon = _
 
   def main(args: Array[String]): Unit = {
@@ -87,6 +89,16 @@ object Atlatl {
     }
   }
 
+  /**
+    * Parses the JSON text of the configuration file into separate values.
+    * @param jsonText
+    * @return A tuple containing 5 values:
+    *         a list of app groups
+    *         filename to the kill sound
+    *         filename to the alarm sound
+    *         how long before an app group's time runs out should the program start emitting warning sounds
+    *         how often to poll the running processes (and to emit warning sounds)
+    */
   private def parseConfig(jsonText: String): (Seq[AppGroup], String, String, Double, Double) = {
     // TODO: extract json field names into constants
     // TODO: find native scala json library?
