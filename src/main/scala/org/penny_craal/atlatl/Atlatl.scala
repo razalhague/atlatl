@@ -68,7 +68,7 @@ object Atlatl {
       if (areAnyAppsRunningFromAGroupInWarningZone) {
         playSound(alarmSound)
       }
-      Thread.sleep(refreshMinutes.toLong * 60 * 1000)
+      Thread.sleep((refreshMinutes * 60 * 1000).toLong)
       loop(updatedGroupTimes, apps)
     }
 
