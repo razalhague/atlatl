@@ -7,6 +7,9 @@
 		{
 			"name": "Games",
 			"dailyMinutes": 60.0,
+			"forbiddenTimes": [
+				{ "start": "03:00", "end": "12:00" }
+			],
 			"processNames": [
 				"RocketLeague.exe",
 			]
