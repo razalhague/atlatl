@@ -2,6 +2,7 @@ package org.penny_craal.atlatl
 
 import java.awt.{SystemTray, TrayIcon}
 import java.io.{File, IOException}
+import java.time.LocalTime
 import javax.imageio.ImageIO
 import javax.sound.sampled.{AudioSystem, Clip}
 
@@ -35,6 +36,15 @@ object Atlatl {
   private def run(conf: String): Unit = {
     val (appGroupList, killSound, alarmSound, alarmThresholdMinutes, refreshMinutes) = parseConfig(conf)
     val appGroups = Map(appGroupList map (appGroup => (appGroup.name, appGroup)): _*)
+    for (appGroup <- appGroupList; ft <- appGroup.forbiddenTimes if ft.lengthMinutes < alarmThresholdMinutes) {
+      throw new RuntimeException("Forbidden time ranges must be longer than the alarm threshold")
+    }
+    if (appGroupList.isEmpty) {
+      throw new RuntimeException("Cannot run with no defined app groups")
+    }
+    if (refreshMinutes <= 0) {
+      throw new RuntimeException("refresh period must be positive")
+    }
     setupAudioSystem(List(alarmSound, killSound))
     setupTrayIcon()
 
@@ -52,23 +62,22 @@ object Atlatl {
       val updatedGroupTimes =
         for ((groupName, spentTime) <- groupTimes)
           yield (groupName, if (anyAppsRunningFromGroup(groupName)) spentTime + refreshMinutes else spentTime)
-      val areAnyAppsRunningFromAGroupInWarningZone =
+      val currentTime = LocalTime.now()
+      val alarmTime = currentTime.plusSeconds((alarmThresholdMinutes * 60).toLong)
+      val shouldAlarm =
         updatedGroupTimes exists { case (groupName, spentTime) =>
-          val timeLeft = appGroups(groupName).dailyMinutes - spentTime
-          0 < timeLeft && timeLeft <= alarmThresholdMinutes && anyAppsRunningFromGroup(groupName)
+          anyAppsRunningFromGroup(groupName) &&
+            appGroups(groupName).shouldBeKilled(spentTime + alarmThresholdMinutes, alarmTime) && // should be killed in $alarmThresholdMinutes
+            !appGroups(groupName).shouldBeKilled(spentTime, currentTime) // but should not be killed right now
         }
-      val trayTooltip = updatedGroupTimes map { case (groupName, spentTime) =>
-        s"$groupName: $spentTime/${appGroups(groupName).dailyMinutes}\n"
-      } reduce (_ + _)
-
-      updateTrayIconTooltip(trayTooltip)
-      for ((groupName, spentTime) <- updatedGroupTimes if spentTime >= appGroups(groupName).dailyMinutes) {
+      updateTrayIconTooltip(trayTooltip(updatedGroupTimes, appGroups))
+      for ((groupName, spentTime) <- updatedGroupTimes if appGroups(groupName).shouldBeKilled(spentTime, currentTime)) {
         for (pi <- apps if appGroups(groupName).processNames contains pi.getName) {
           playSound(killSound)
           JProcesses.killProcess(pi.getPid.toInt)
         }
       }
-      if (areAnyAppsRunningFromAGroupInWarningZone) {
+      if (shouldAlarm) {
         playSound(alarmSound)
       }
       Thread.sleep((refreshMinutes * 60 * 1000).toLong)
@@ -76,6 +85,22 @@ object Atlatl {
     }
 
     loop(Map(appGroupList map (appGroup => (appGroup.name, 0.0)): _*), Seq())
+  }
+
+  private def trayTooltip(updatedGroupTimes: Map[String, Double], appGroups: Map[String, AppGroup]) = {
+    updatedGroupTimes map { case (groupName, spentTime) =>
+      groupName + ": " +
+        (Seq(
+          appGroups(groupName).dailyMinutes match {
+            case Some(allowedTime) => Some(s"$spentTime/$allowedTime")
+            case None => None
+          },
+          if (appGroups(groupName).forbiddenTimes.nonEmpty)
+            Some("forbidden during [" + (appGroups(groupName).forbiddenTimes map (_.toString) reduce (_ + ", " + _)) + "]")
+          else
+            None
+        ) collect { case Some(s) => s } reduce (_ + ", " + _))
+    } reduce (_ + "\n" + _)
   }
 
   private def readConfig(): Try[String] = {
@@ -106,7 +131,11 @@ object Atlatl {
     val appGroups = asScalaIterator(configJson.get("groups").asInstanceOf[JSONArray].iterator()) map (_.asInstanceOf[JSONObject]) map (jsonAppGroup =>
       new AppGroup(
         jsonAppGroup.get("name").asInstanceOf[String],
-        jsonAppGroup.get("dailyMinutes").asInstanceOf[Double],
+        if (jsonAppGroup.containsKey("dailyMinutes"))
+          Some(jsonAppGroup.get("dailyMinutes").asInstanceOf[Double])
+        else
+          None,
+        parseForbiddenTimes(jsonAppGroup),
         (asScalaIterator(jsonAppGroup.get("processNames").asInstanceOf[JSONArray].iterator()) map (_.asInstanceOf[String])).toSeq
       )
     )
@@ -117,6 +146,18 @@ object Atlatl {
       configJson.get("alarmThresholdMinutes").asInstanceOf[Double],
       configJson.get("refreshMinutes").asInstanceOf[Double]
     )
+  }
+
+  private def parseForbiddenTimes(jsonAppGroup: JSONObject): Seq[TimeRange] = {
+    if (jsonAppGroup.containsKey("forbiddenTimes"))
+      (asScalaIterator(jsonAppGroup.get("forbiddenTimes").asInstanceOf[JSONArray].iterator()) map (_.asInstanceOf[JSONObject]) map (forbiddenTime =>
+        new TimeRange(
+          LocalTime.parse(forbiddenTime.get("start").asInstanceOf[String]),
+          LocalTime.parse(forbiddenTime.get("end").asInstanceOf[String])
+        )
+      )).toSeq
+    else
+      Seq()
   }
 
   private def fetchRunningProcesses(): Seq[ProcessInfo] = {
@@ -151,5 +192,3 @@ object Atlatl {
     }
   }
 }
-
-class AppGroup(val name: String, val dailyMinutes: Double, val processNames: Seq[String])
