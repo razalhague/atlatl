@@ -9,7 +9,7 @@ class AppGroup(val name: String, val dailyMinutes: Option[Double], val forbidden
   if (processNames.isEmpty) {
     throw new IllegalArgumentException("An app group must define process names that belong to it")
   }
-  dailyMinutes match { case Some(time) =>
+  dailyMinutes foreach { time =>
     if (time <= 0) {
       throw new IllegalArgumentException("Allowed time for an app group must be positive")
     }
