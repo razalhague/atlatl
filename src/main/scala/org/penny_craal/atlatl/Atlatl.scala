@@ -47,17 +47,13 @@ object Atlatl {
     setupAudioSystem(List(conf.alarmSoundFilename, conf.killSoundFilename))
     setupTrayIcon()
 
-    def loop(groupTimes: Map[String, Double], appsFromLastRefresh: Iterable[ProcessInfo]): Unit = {
+    def loop(groupTimes: Map[String, Double]): Unit = {
       val apps = for {
         appGroup <- conf.appGroups
         pi <- fetchRunningProcesses() if appGroup.processNames contains pi.getName
       } yield pi
-      val appsInCommon = for {
-        piOld <- appsFromLastRefresh
-        piNew <- apps if piNew.getName == piOld.getName
-      } yield piNew
       def anyAppsRunningFromGroup(groupName: String) =
-        appsInCommon exists (appGroups(groupName).processNames contains _.getName)
+        apps exists (appGroups(groupName).processNames contains _.getName)
       val updatedGroupTimes =
         for ((groupName, spentTime) <- groupTimes)
           yield (groupName, if (anyAppsRunningFromGroup(groupName)) spentTime + conf.refreshMinutes else spentTime)
@@ -80,10 +76,10 @@ object Atlatl {
         playSound(conf.alarmSoundFilename)
       }
       Thread.sleep((conf.refreshMinutes * 60 * 1000).toLong)
-      loop(updatedGroupTimes, apps)
+      loop(updatedGroupTimes)
     }
 
-    loop(Map(conf.appGroups map (appGroup => (appGroup.name, 0.0)): _*), Seq())
+    loop(Map(conf.appGroups map (appGroup => (appGroup.name, 0.0)): _*))
   }
 
   private def trayTooltip(updatedGroupTimes: Map[String, Double], appGroups: Map[String, AppGroup]) = {
