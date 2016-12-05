@@ -2,7 +2,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>org.penny_craal</groupId>
   <artifactId>atlatl</artifactId>
-  <version>0.1.0</version>
+  <version>0.1.0-SNAPSHOT</version>
   <name>Atlatl</name>
   <description>atlatl, the loud application time limiter</description>
   <inceptionYear>2016</inceptionYear>
