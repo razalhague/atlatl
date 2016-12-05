@@ -12,7 +12,17 @@ class Config private (
     val alarmSoundFilename: String,
     val alarmThresholdMinutes: Double,
     val refreshMinutes: Double
-  ) {}
+  ) {
+  for (appGroup <- appGroups; ft <- appGroup.forbiddenTimes if ft.lengthMinutes < alarmThresholdMinutes) {
+    throw new IllegalArgumentException("Forbidden time ranges must be longer than the alarm threshold")
+  }
+  if (appGroups.isEmpty) {
+    throw new IllegalArgumentException("At least one app group must be defined")
+  }
+  if (refreshMinutes <= 0) {
+    throw new IllegalArgumentException("Refresh period must be positive")
+  }
+}
 
 object Config {
   // constants for JSON field names

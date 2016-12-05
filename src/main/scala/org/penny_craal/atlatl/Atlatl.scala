@@ -35,15 +35,7 @@ object Atlatl {
   private def run(confText: String): Unit = {
     val conf = Config.parse(confText)
     val appGroups = Map(conf.appGroups map (appGroup => (appGroup.name, appGroup)): _*)
-    for (appGroup <- conf.appGroups; ft <- appGroup.forbiddenTimes if ft.lengthMinutes < conf.alarmThresholdMinutes) {
-      throw new RuntimeException("Forbidden time ranges must be longer than the alarm threshold")
-    }
-    if (conf.appGroups.isEmpty) {
-      throw new RuntimeException("Cannot run with no defined app groups")
-    }
-    if (conf.refreshMinutes <= 0) {
-      throw new RuntimeException("refresh period must be positive")
-    }
+    
     setupAudioSystem(List(conf.alarmSoundFilename, conf.killSoundFilename))
     setupTrayIcon()
 
