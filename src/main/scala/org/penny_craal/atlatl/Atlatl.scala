@@ -2,7 +2,8 @@ package org.penny_craal.atlatl
 
 import java.awt.{SystemTray, TrayIcon}
 import java.io.{File, IOException}
-import java.time.LocalTime
+import java.time.temporal.{ChronoField, ChronoUnit}
+import java.time.{LocalDateTime, LocalTime}
 import javax.imageio.ImageIO
 import javax.sound.sampled.{AudioSystem, Clip}
 
@@ -39,26 +40,29 @@ object Atlatl {
     setupAudioSystem(List(conf.alarmSoundFilename, conf.killSoundFilename))
     setupTrayIcon()
 
-    def loop(groupTimes: Map[String, Double]): Unit = {
+    def loop(groupTimes: Map[String, Double], lastRefresh: LocalDateTime, oldSleepMinutes: Double): Unit = {
       val apps = for {
         appGroup <- conf.appGroups
         pi <- fetchRunningProcesses() if appGroup.processNames contains pi.getName
       } yield pi
+      val now = LocalDateTime.now()
+      val realRefreshMinutes = lastRefresh.until(now, ChronoUnit.MILLIS).toDouble / 60000
+      val sleepMinutes = conf.refreshMinutes - (realRefreshMinutes - oldSleepMinutes)
       def anyAppsRunningFromGroup(groupName: String) =
         apps exists (appGroups(groupName).processNames contains _.getName)
       val updatedGroupTimes =
-        for ((groupName, spentTime) <- groupTimes)
-          yield (groupName, if (anyAppsRunningFromGroup(groupName)) spentTime + conf.refreshMinutes else spentTime)
+        for ((groupName, spentMinutes) <- groupTimes)
+          yield (groupName, if (anyAppsRunningFromGroup(groupName)) spentMinutes + realRefreshMinutes else spentMinutes)
       val currentTime = LocalTime.now()
       val alarmTime = currentTime.plusSeconds((conf.alarmThresholdMinutes * 60).toLong)
       val shouldAlarm =
-        updatedGroupTimes exists { case (groupName, spentTime) =>
+        updatedGroupTimes exists { case (groupName, spentMinutes) =>
           anyAppsRunningFromGroup(groupName) &&
-            appGroups(groupName).shouldBeKilled(spentTime + conf.alarmThresholdMinutes, alarmTime) && // should be killed in $alarmThresholdMinutes
-            !appGroups(groupName).shouldBeKilled(spentTime, currentTime) // but should not be killed right now
+            appGroups(groupName).shouldBeKilled(spentMinutes + conf.alarmThresholdMinutes, alarmTime) && // should be killed in $alarmThresholdMinutes
+            !appGroups(groupName).shouldBeKilled(spentMinutes, currentTime) // but should not be killed right now
         }
       updateTrayIconTooltip(trayTooltip(updatedGroupTimes, appGroups))
-      for ((groupName, spentTime) <- updatedGroupTimes if appGroups(groupName).shouldBeKilled(spentTime, currentTime)) {
+      for ((groupName, spentMinutes) <- updatedGroupTimes if appGroups(groupName).shouldBeKilled(spentMinutes, currentTime)) {
         for (pi <- apps if appGroups(groupName).processNames contains pi.getName) {
           playSound(conf.killSoundFilename)
           JProcesses.killProcess(pi.getPid.toInt)
@@ -67,28 +71,31 @@ object Atlatl {
       if (shouldAlarm) {
         playSound(conf.alarmSoundFilename)
       }
-      Thread.sleep((conf.refreshMinutes * 60 * 1000).toLong)
-      loop(updatedGroupTimes)
+      Thread.sleep((sleepMinutes * 60 * 1000).toLong)
+      loop(updatedGroupTimes, now, sleepMinutes)
     }
 
-    loop(Map(conf.appGroups map (appGroup => (appGroup.name, 0.0)): _*))
+    loop(Map(conf.appGroups map (appGroup => (appGroup.name, 0.0)): _*), LocalDateTime.now(), 0.0)
   }
 
   private def trayTooltip(updatedGroupTimes: Map[String, Double], appGroups: Map[String, AppGroup]) = {
-    updatedGroupTimes map { case (groupName, spentTime) =>
+    updatedGroupTimes map { case (groupName, spentMinutes) =>
       groupName + ": " +
         (Seq(
           appGroups(groupName).dailyMinutes match {
-            case Some(allowedTime) => Some(s"$spentTime/$allowedTime")
+            case Some(allowedMinutes) => Some(minutesToTimeString(spentMinutes) + "/" + minutesToTimeString(allowedMinutes))
             case None => None
           },
           if (appGroups(groupName).forbiddenTimes.nonEmpty)
             Some("forbidden during [" + (appGroups(groupName).forbiddenTimes map (_.toString) reduce (_ + ", " + _)) + "]")
           else
             None
-        ) collect { case Some(s) => s } reduce (_ + ", " + _))
-    } reduce (_ + "\n" + _)
+        ) collect { case Some(s) => s } reduce (_ + ", " + _)) // if the group has both a daily limit and forbidden times, separate them with a comma
+    } reduce (_ + "\n" + _) // separate groups with newlines
   }
+
+  private def minutesToTimeString(minutes: Double): String =
+    f"${(minutes / 60).floor}%1.0f:${(minutes % 60).floor}%02.0f:${(minutes % 1 * 60).floor}%02.0f"
 
   private def readConfig(): Try[String] = {
     val configFile = Source.fromFile(configFileName)
