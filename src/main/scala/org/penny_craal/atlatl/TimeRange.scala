@@ -13,7 +13,7 @@ class TimeRange(val start: LocalTime, val end: LocalTime) {
 
   val lengthMinutes: Double =
     if (start.isAfter(end))
-      25 * 60 - (end.until(start, ChronoUnit.SECONDS).toDouble / 60)
+      24 * 60 - (end.until(start, ChronoUnit.SECONDS).toDouble / 60)
     else
       start.until(end, ChronoUnit.SECONDS).toDouble / 60
 
