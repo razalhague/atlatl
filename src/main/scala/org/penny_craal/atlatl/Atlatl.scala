@@ -6,7 +6,6 @@ import java.time.LocalTime
 import javax.imageio.ImageIO
 import javax.sound.sampled.{AudioSystem, Clip}
 
-import org.json.simple.{JSONArray, JSONObject, JSONValue}
 import org.jutils.jprocesses.JProcesses
 import org.jutils.jprocesses.model.ProcessInfo
 
@@ -33,24 +32,24 @@ object Atlatl {
     }
   }
 
-  private def run(conf: String): Unit = {
-    val (appGroupList, killSound, alarmSound, alarmThresholdMinutes, refreshMinutes) = parseConfig(conf)
-    val appGroups = Map(appGroupList map (appGroup => (appGroup.name, appGroup)): _*)
-    for (appGroup <- appGroupList; ft <- appGroup.forbiddenTimes if ft.lengthMinutes < alarmThresholdMinutes) {
+  private def run(confText: String): Unit = {
+    val conf = Config.parse(confText)
+    val appGroups = Map(conf.appGroups map (appGroup => (appGroup.name, appGroup)): _*)
+    for (appGroup <- conf.appGroups; ft <- appGroup.forbiddenTimes if ft.lengthMinutes < conf.alarmThresholdMinutes) {
       throw new RuntimeException("Forbidden time ranges must be longer than the alarm threshold")
     }
-    if (appGroupList.isEmpty) {
+    if (conf.appGroups.isEmpty) {
       throw new RuntimeException("Cannot run with no defined app groups")
     }
-    if (refreshMinutes <= 0) {
+    if (conf.refreshMinutes <= 0) {
       throw new RuntimeException("refresh period must be positive")
     }
-    setupAudioSystem(List(alarmSound, killSound))
+    setupAudioSystem(List(conf.alarmSoundFilename, conf.killSoundFilename))
     setupTrayIcon()
 
     def loop(groupTimes: Map[String, Double], appsFromLastRefresh: Iterable[ProcessInfo]): Unit = {
       val apps = for {
-        appGroup <- appGroupList
+        appGroup <- conf.appGroups
         pi <- fetchRunningProcesses() if appGroup.processNames contains pi.getName
       } yield pi
       val appsInCommon = for {
@@ -61,30 +60,30 @@ object Atlatl {
         appsInCommon exists (appGroups(groupName).processNames contains _.getName)
       val updatedGroupTimes =
         for ((groupName, spentTime) <- groupTimes)
-          yield (groupName, if (anyAppsRunningFromGroup(groupName)) spentTime + refreshMinutes else spentTime)
+          yield (groupName, if (anyAppsRunningFromGroup(groupName)) spentTime + conf.refreshMinutes else spentTime)
       val currentTime = LocalTime.now()
-      val alarmTime = currentTime.plusSeconds((alarmThresholdMinutes * 60).toLong)
+      val alarmTime = currentTime.plusSeconds((conf.alarmThresholdMinutes * 60).toLong)
       val shouldAlarm =
         updatedGroupTimes exists { case (groupName, spentTime) =>
           anyAppsRunningFromGroup(groupName) &&
-            appGroups(groupName).shouldBeKilled(spentTime + alarmThresholdMinutes, alarmTime) && // should be killed in $alarmThresholdMinutes
+            appGroups(groupName).shouldBeKilled(spentTime + conf.alarmThresholdMinutes, alarmTime) && // should be killed in $alarmThresholdMinutes
             !appGroups(groupName).shouldBeKilled(spentTime, currentTime) // but should not be killed right now
         }
       updateTrayIconTooltip(trayTooltip(updatedGroupTimes, appGroups))
       for ((groupName, spentTime) <- updatedGroupTimes if appGroups(groupName).shouldBeKilled(spentTime, currentTime)) {
         for (pi <- apps if appGroups(groupName).processNames contains pi.getName) {
-          playSound(killSound)
+          playSound(conf.killSoundFilename)
           JProcesses.killProcess(pi.getPid.toInt)
         }
       }
       if (shouldAlarm) {
-        playSound(alarmSound)
+        playSound(conf.alarmSoundFilename)
       }
-      Thread.sleep((refreshMinutes * 60 * 1000).toLong)
+      Thread.sleep((conf.refreshMinutes * 60 * 1000).toLong)
       loop(updatedGroupTimes, apps)
     }
 
-    loop(Map(appGroupList map (appGroup => (appGroup.name, 0.0)): _*), Seq())
+    loop(Map(conf.appGroups map (appGroup => (appGroup.name, 0.0)): _*), Seq())
   }
 
   private def trayTooltip(updatedGroupTimes: Map[String, Double], appGroups: Map[String, AppGroup]) = {
@@ -112,52 +111,6 @@ object Atlatl {
     } finally {
       configFile.close()
     }
-  }
-
-  /**
-    * Parses the JSON text of the configuration file into separate values.
-    * @param jsonText
-    * @return A tuple containing 5 values:
-    *         a list of app groups
-    *         filename to the kill sound
-    *         filename to the alarm sound
-    *         how long before an app group's time runs out should the program start emitting warning sounds
-    *         how often to poll the running processes (and to emit warning sounds)
-    */
-  private def parseConfig(jsonText: String): (Seq[AppGroup], String, String, Double, Double) = {
-    // TODO: extract json field names into constants
-    // TODO: find native scala json library?
-    val configJson = JSONValue.parse(jsonText).asInstanceOf[JSONObject]
-    val appGroups = asScalaIterator(configJson.get("groups").asInstanceOf[JSONArray].iterator()) map (_.asInstanceOf[JSONObject]) map (jsonAppGroup =>
-      new AppGroup(
-        jsonAppGroup.get("name").asInstanceOf[String],
-        if (jsonAppGroup.containsKey("dailyMinutes"))
-          Some(jsonAppGroup.get("dailyMinutes").asInstanceOf[Double])
-        else
-          None,
-        parseForbiddenTimes(jsonAppGroup),
-        (asScalaIterator(jsonAppGroup.get("processNames").asInstanceOf[JSONArray].iterator()) map (_.asInstanceOf[String])).toSeq
-      )
-    )
-    (
-      appGroups.toSeq,
-      configJson.get("killSound").asInstanceOf[String],
-      configJson.get("alarmSound").asInstanceOf[String],
-      configJson.get("alarmThresholdMinutes").asInstanceOf[Double],
-      configJson.get("refreshMinutes").asInstanceOf[Double]
-    )
-  }
-
-  private def parseForbiddenTimes(jsonAppGroup: JSONObject): Seq[TimeRange] = {
-    if (jsonAppGroup.containsKey("forbiddenTimes"))
-      (asScalaIterator(jsonAppGroup.get("forbiddenTimes").asInstanceOf[JSONArray].iterator()) map (_.asInstanceOf[JSONObject]) map (forbiddenTime =>
-        new TimeRange(
-          LocalTime.parse(forbiddenTime.get("start").asInstanceOf[String]),
-          LocalTime.parse(forbiddenTime.get("end").asInstanceOf[String])
-        )
-      )).toSeq
-    else
-      Seq()
   }
 
   private def fetchRunningProcesses(): Seq[ProcessInfo] = {
