@@ -71,7 +71,9 @@ object Atlatl {
       if (shouldAlarm) {
         playSound(conf.alarmSoundFilename)
       }
-      Thread.sleep((sleepMinutes * 60 * 1000).toLong)
+      if (sleepMinutes > 0) {
+        Thread.sleep((sleepMinutes * 60 * 1000).toLong)
+      }
       loop(updatedGroupTimes, now, sleepMinutes)
     }
 
