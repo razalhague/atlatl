@@ -35,7 +35,7 @@ class TimeRange(val start: LocalTime, val end: LocalTime) {
     if (start.isAfter(end))
       24 * 60 - (end.until(start, ChronoUnit.MILLIS).toDouble / 60000)
     else
-      start.until(end, ChronoUnit.SECONDS).toDouble / 60
+      start.until(end, ChronoUnit.MILLIS).toDouble / 60000
 
   override def toString: String =
     start.toString + "-" + end.toString
