@@ -22,7 +22,6 @@ package org.penny_craal.atlatl
 
 import java.awt.{SystemTray, TrayIcon}
 import java.io.{File, IOException}
-import java.time.temporal.ChronoUnit
 import java.time.{LocalDateTime, LocalTime}
 import javax.imageio.ImageIO
 import javax.sound.sampled.{AudioSystem, Clip}
