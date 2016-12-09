@@ -23,12 +23,17 @@ package org.penny_craal.atlatl
 import java.time.LocalTime
 import java.time.temporal.ChronoUnit
 
+/**
+  * Represents a time range.
+  * @param start beginning of the range (inclusive)
+  * @param end end of the range (exclusive)
+  */
 class TimeRange(val start: LocalTime, val end: LocalTime) {
   def inRange(time: LocalTime): Boolean = {
     if (start.isAfter(end))
-      time.isAfter(start) || time.isBefore(end)
+      time.isAfter(start) || time.isBefore(end) || time == start
     else
-      time.isAfter(start) && time.isBefore(end)
+      time.isAfter(start) && time.isBefore(end) || time == start
   }
 
   val lengthMinutes: Double =
