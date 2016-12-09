@@ -41,7 +41,7 @@ class AppGroup(val name: String, val dailyMinutes: Option[Double], val forbidden
   }
 
   def isDuringForbiddenTime(time: LocalTime): Boolean =
-    forbiddenTimes exists (_.inRange(time))
+    forbiddenTimes exists (_.contains(time))
 
   def shouldBeKilled(spentMinutes: Double, time: LocalTime): Boolean =
     isOverTime(spentMinutes) || isDuringForbiddenTime(time)

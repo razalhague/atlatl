@@ -29,7 +29,7 @@ import java.time.temporal.ChronoUnit
   * @param end end of the range (exclusive)
   */
 class TimeRange(val start: LocalTime, val end: LocalTime) {
-  def inRange(time: LocalTime): Boolean = {
+  def contains(time: LocalTime): Boolean = {
     if (start.isAfter(end))
       time.isAfter(start) || time.isBefore(end) || time == start
     else

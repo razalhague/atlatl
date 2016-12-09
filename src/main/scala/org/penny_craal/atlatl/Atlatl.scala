@@ -71,7 +71,7 @@ object Atlatl {
       def anyAppsRunningFromGroup(groupName: String) =
         apps exists (appGroups(groupName).processNames contains _.getName)
       val updatedGroupTimes =
-        if (refreshTimeRange.inRange(conf.dailyResetTime))
+        if (refreshTimeRange.contains(conf.dailyResetTime))
           groupTimes mapValues (_ => 0.0)
         else
           for ((groupName, spentMinutes) <- groupTimes)
