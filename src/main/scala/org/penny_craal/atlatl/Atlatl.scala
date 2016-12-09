@@ -66,13 +66,16 @@ object Atlatl {
         pi <- fetchRunningProcesses() if appGroup.processNames contains pi.getName
       } yield pi
       val now = LocalDateTime.now()
-      val realRefreshMinutes = lastRefresh.until(now, ChronoUnit.MILLIS).toDouble / 60000
-      val sleepMinutes = conf.refreshMinutes - (realRefreshMinutes - oldSleepMinutes)
+      val refreshTimeRange = new TimeRange(lastRefresh.toLocalTime, now.toLocalTime) // assumes that the refresh takes less than a day
+      val sleepMinutes = conf.refreshMinutes - (refreshTimeRange.lengthMinutes - oldSleepMinutes)
       def anyAppsRunningFromGroup(groupName: String) =
         apps exists (appGroups(groupName).processNames contains _.getName)
       val updatedGroupTimes =
-        for ((groupName, spentMinutes) <- groupTimes)
-          yield (groupName, if (anyAppsRunningFromGroup(groupName)) spentMinutes + realRefreshMinutes else spentMinutes)
+        if (refreshTimeRange.inRange(conf.dailyResetTime))
+          groupTimes mapValues (_ => 0.0)
+        else
+          for ((groupName, spentMinutes) <- groupTimes)
+            yield (groupName, if (anyAppsRunningFromGroup(groupName)) spentMinutes + refreshTimeRange.lengthMinutes else spentMinutes)
       val currentTime = LocalTime.now()
       val alarmTime = currentTime.plusSeconds((conf.alarmThresholdMinutes * 60).toLong)
       val shouldAlarm =

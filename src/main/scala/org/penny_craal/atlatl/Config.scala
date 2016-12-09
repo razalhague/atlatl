@@ -31,7 +31,8 @@ class Config private (
     val killSoundFilename: String,
     val alarmSoundFilename: String,
     val alarmThresholdMinutes: Double,
-    val refreshMinutes: Double
+    val refreshMinutes: Double,
+    val dailyResetTime: LocalTime
   ) {
   for (appGroup <- appGroups; ft <- appGroup.forbiddenTimes if ft.lengthMinutes < alarmThresholdMinutes) {
     throw new IllegalArgumentException("Forbidden time ranges must be longer than the alarm threshold")
@@ -57,6 +58,7 @@ object Config {
   private val forbiddenTimes = "forbiddenTimes"
   private val forbiddenTimeStart = "start"
   private val forbiddenTimeEnd = "end"
+  private val dailyResetTime = "dailyResetTime"
 
   def parse(jsonText: String): Config = {
     // TODO: find native scala json library?
@@ -77,7 +79,8 @@ object Config {
       configJson.get(killSound).asInstanceOf[String],
       configJson.get(alarmSound).asInstanceOf[String],
       configJson.get(alarmThresholdMinutes).asInstanceOf[Double],
-      configJson.get(refreshMinutes).asInstanceOf[Double]
+      configJson.get(refreshMinutes).asInstanceOf[Double],
+      LocalTime.parse(configJson.get(dailyResetTime).asInstanceOf[String])
     )
   }
 

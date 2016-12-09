@@ -3,6 +3,7 @@
 	"alarmSound": "alarm.wav",
 	"alarmThresholdMinutes": 10.0,
 	"refreshMinutes": 1.0,
+	"dailyResetTime": "06:00",
 	"groups": [
 		{
 			"name": "Games",
@@ -11,7 +12,7 @@
 				{ "start": "03:00", "end": "12:00" }
 			],
 			"processNames": [
-				"RocketLeague.exe",
+				"RocketLeague.exe"
 			]
 		}
 	]

@@ -14,7 +14,7 @@ TODO
 ====
 
 * Split code into multiple files.
-* Reset point for accumulated time, and carry accumulated time over program termination. At the moment the program assumes you shutdown your computer for the night, and only for the night. Restarting the program resets the accumulated time.
+* Carry accumulated time over program termination. At the moment the program assumes you don't shutdown your computer. Restarting the program resets the accumulated time.
 * Configuration GUI.
 * Different sized icons?
 * automate turning the SVG into a PNG
