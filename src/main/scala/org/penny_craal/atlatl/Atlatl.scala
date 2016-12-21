@@ -21,7 +21,7 @@
 package org.penny_craal.atlatl
 
 import java.io.File
-import java.time.{LocalDateTime, LocalTime}
+import java.time.LocalTime
 import javax.sound.sampled.{AudioSystem, Clip}
 
 import akka.actor.{Actor, ActorLogging, ActorSystem, Props, ReceiveTimeout}
@@ -50,9 +50,9 @@ class Atlatl extends Actor with ActorLogging {
 
   private val appGroups = (conf.appGroups map (appGroup => (appGroup.name, appGroup))).toMap
 
-  private var lastRefresh = LocalDateTime.now()
-  private var oldSleepMinutes = 0.0
-  private var groupTimes = (conf.appGroups map (appGroup => (appGroup.name, 0.0))).toMap
+  private var prevRefreshTime = LocalTime.now()
+  private var prevTimeoutMinutes = 0.0
+  private var prevGroupTimes = (conf.appGroups map (appGroup => (appGroup.name, 0.0))).toMap
   context.setReceiveTimeout(1.milli)
 
   override def receive: Receive = {
@@ -64,30 +64,29 @@ class Atlatl extends Actor with ActorLogging {
         appGroup <- conf.appGroups
         pi <- fetchRunningProcesses() if appGroup.processNames contains pi.getName
       } yield pi
-      val now = LocalDateTime.now()
-      val refreshTimeRange = new TimeRange(lastRefresh.toLocalTime, now.toLocalTime) // assumes that the refresh takes less than a day
-      val sleepMinutes = conf.refreshMinutes - (refreshTimeRange.lengthMinutes - oldSleepMinutes)
+      val refreshTime = LocalTime.now()
+      val refreshTimeRange = new TimeRange(prevRefreshTime, refreshTime) // assumes that the refresh takes less than a day
+      val timeoutMinutes = Math.min(conf.refreshMinutes - (refreshTimeRange.lengthMinutes - prevTimeoutMinutes), 1.0 / 60.0 / 1000.0) // timeout must be at least one millisecond
       def anyAppsRunningFromGroup(groupName: String) =
         apps exists (appGroups(groupName).processNames contains _.getName)
-      val updatedGroupTimes =
+      val groupTimes =
         if (refreshTimeRange.contains(conf.dailyResetTime))
-          groupTimes mapValues (_ => 0.0)
+          prevGroupTimes mapValues (_ => 0.0)
         else
-          for ((groupName, spentMinutes) <- groupTimes)
+          for ((groupName, spentMinutes) <- prevGroupTimes)
             yield (groupName, if (anyAppsRunningFromGroup(groupName)) spentMinutes + refreshTimeRange.lengthMinutes else spentMinutes)
-      val currentTime = LocalTime.now()
-      val alarmTime = currentTime.plusSeconds((conf.alarmThresholdMinutes * 60).toLong)
+      val alarmTime = refreshTime.plusSeconds((conf.alarmThresholdMinutes * 60).toLong)
       val shouldAlarm =
-        updatedGroupTimes exists { case (groupName, spentMinutes) =>
+        groupTimes exists { case (groupName, spentMinutes) =>
           anyAppsRunningFromGroup(groupName) &&
             appGroups(groupName).shouldBeKilled(spentMinutes + conf.alarmThresholdMinutes, alarmTime) && // should be killed in $alarmThresholdMinutes
-            !appGroups(groupName).shouldBeKilled(spentMinutes, currentTime) // but should not be killed right now
+            !appGroups(groupName).shouldBeKilled(spentMinutes, refreshTime) // but should not be killed right now
         }
       val toBeKilled = for {
-        (groupName, spentMinutes) <- updatedGroupTimes if appGroups(groupName).shouldBeKilled(spentMinutes, currentTime)
+        (groupName, spentMinutes) <- groupTimes if appGroups(groupName).shouldBeKilled(spentMinutes, refreshTime)
         pi <- apps if appGroups(groupName).processNames contains pi.getName
       } yield pi.getPid.toInt
-      trayActor ! UpdateToolTip(trayTooltip(updatedGroupTimes, appGroups))
+      trayActor ! UpdateToolTip(trayTooltip(groupTimes, appGroups))
       if (shouldAlarm) {
         playSound(conf.alarmSoundFilename)
       }
@@ -95,12 +94,10 @@ class Atlatl extends Actor with ActorLogging {
         playSound(conf.killSoundFilename)
       }
       toBeKilled foreach JProcesses.killProcess
-      if (sleepMinutes > 0) {
-        context.setReceiveTimeout((sleepMinutes * 60 * 1000).toLong.millis)
-      }
-      lastRefresh = now
-      oldSleepMinutes = sleepMinutes
-      groupTimes = updatedGroupTimes
+      context.setReceiveTimeout((timeoutMinutes * 60 * 1000).toLong.millis)
+      prevRefreshTime = refreshTime
+      prevTimeoutMinutes = timeoutMinutes
+      prevGroupTimes = groupTimes
   }
 
   private def trayTooltip(updatedGroupTimes: Map[String, Double], appGroups: Map[String, AppGroup]) = {
