@@ -53,9 +53,18 @@ class Atlatl extends Actor with ActorLogging {
   private var prevRefreshTime = LocalTime.now()
   private var prevTimeoutMinutes = 0.0
   private var prevGroupTimes = (conf.appGroups map (appGroup => (appGroup.name, 0.0))).toMap
+  private var suspendedTimeRange: Option[TimeRange] = None
   context.setReceiveTimeout(1.milli)
 
   override def receive: Receive = {
+    case Suspend =>
+      log.info("suspension engaged")
+      val currentTime = LocalTime.now()
+      suspendedTimeRange = Some(new TimeRange(
+        currentTime.plusMinutes(conf.suspensionDelayMinutes),
+        currentTime.plusMinutes(conf.suspensionDurationMinutes + conf.suspensionDelayMinutes)
+      ))
+      context.setReceiveTimeout(1.milli) // to update the tooltip and everything else ASAP
     case Exit =>
       log.info("exiting...")
       context.system.terminate()
@@ -67,6 +76,9 @@ class Atlatl extends Actor with ActorLogging {
       val refreshTime = LocalTime.now()
       val refreshTimeRange = new TimeRange(prevRefreshTime, refreshTime) // assumes that the refresh takes less than a day
       val timeoutMinutes = Math.max(conf.refreshMinutes - (refreshTimeRange.lengthMinutes - prevTimeoutMinutes), 1.0 / 60.0 / 1000.0) // timeout must be at least one millisecond
+      if (!(suspensionInEffectAt(refreshTime) || suspensionInEffectAt(refreshTime.plusMinutes(conf.suspensionDelayMinutes)))) {
+        suspendedTimeRange = None
+      }
       def anyAppsRunningFromGroup(groupName: String) =
         apps exists (appGroups(groupName).processNames contains _.getName)
       val groupTimes =
@@ -75,18 +87,18 @@ class Atlatl extends Actor with ActorLogging {
         else
           for ((groupName, spentMinutes) <- prevGroupTimes)
             yield (groupName, if (anyAppsRunningFromGroup(groupName)) spentMinutes + refreshTimeRange.lengthMinutes else spentMinutes)
-      val alarmTime = refreshTime.plusSeconds((conf.alarmThresholdMinutes * 60).toLong)
+      val alarmTime = refreshTime.plusMinutes(conf.alarmThresholdMinutes)
       val shouldAlarm =
         groupTimes exists { case (groupName, spentMinutes) =>
           anyAppsRunningFromGroup(groupName) &&
-            appGroups(groupName).shouldBeKilled(spentMinutes + conf.alarmThresholdMinutes, alarmTime) && // should be killed in $alarmThresholdMinutes
-            !appGroups(groupName).shouldBeKilled(spentMinutes, refreshTime) // but should not be killed right now
+            shouldKillGroupAt(groupName, alarmTime, spentMinutes + conf.alarmThresholdMinutes) && // should be killed in $alarmThresholdMinutes
+            !shouldKillGroupAt(groupName, refreshTime, spentMinutes) // but should not be killed right now
         }
       val toBeKilled = for {
-        (groupName, spentMinutes) <- groupTimes if appGroups(groupName).shouldBeKilled(spentMinutes, refreshTime)
+        (groupName, spentMinutes) <- groupTimes if shouldKillGroupAt(groupName, refreshTime, spentMinutes)
         pi <- apps if appGroups(groupName).processNames contains pi.getName
       } yield pi.getPid.toInt
-      trayActor ! UpdateToolTip(trayTooltip(groupTimes, appGroups))
+      trayActor ! UpdateToolTip(trayTooltip(groupTimes))
       if (shouldAlarm) {
         playSound(conf.alarmSoundFilename)
       }
@@ -100,20 +112,38 @@ class Atlatl extends Actor with ActorLogging {
       prevGroupTimes = groupTimes
   }
 
-  private def trayTooltip(updatedGroupTimes: Map[String, Double], appGroups: Map[String, AppGroup]) = {
-    updatedGroupTimes map { case (groupName, spentMinutes) =>
-      groupName + ": " +
-        (Seq(
-          appGroups(groupName).dailyMinutes match {
-            case Some(allowedMinutes) => Some(minutesToTimeString(spentMinutes) + "/" + minutesToTimeString(allowedMinutes))
-            case None => None
-          },
-          if (appGroups(groupName).forbiddenTimes.nonEmpty)
-            Some("forbidden during [" + (appGroups(groupName).forbiddenTimes map (_.toString) reduce (_ + ", " + _)) + "]")
-          else
-            None
-        ) collect { case Some(s) => s } reduce (_ + ", " + _)) // if the group has both a daily limit and forbidden times, separate them with a comma
+  private def trayTooltip(groupTimes: Map[String, Double]) = {
+    val suspension = suspendedTimeRange match {
+      case Some(time) => "suspension scheduled during " + time + "\n"
+      case None => ""
+    }
+    val groupDescriptions = groupTimes map { case (groupName, spentMinutes) =>
+      val dailyAllowance = appGroups(groupName).dailyMinutes match {
+        case Some(allowedMinutes) => minutesToTimeString(spentMinutes) + "/" + minutesToTimeString(allowedMinutes)
+        case None => ""
+      }
+      val forbiddenTimes =
+        if (appGroups(groupName).forbiddenTimes.nonEmpty)
+          "forbidden during [" + (appGroups(groupName).forbiddenTimes map (_.toString) reduce (_ + ", " + _)) + "]"
+        else
+          ""
+      val groupLimits =
+        if (dailyAllowance.nonEmpty && forbiddenTimes.nonEmpty)
+          dailyAllowance + ", " + forbiddenTimes
+        else
+          dailyAllowance + forbiddenTimes // one or both of these are empty, so no separator necessary
+      groupName + ": " + groupLimits
     } reduce (_ + "\n" + _) // separate groups with newlines
+    suspension + groupDescriptions // if suspension is non-empty, it contains a newline to separate it from the descriptions
+  }
+
+  private def shouldKillGroupAt(groupName: String, time: LocalTime, spentMinutes: Double): Boolean =
+    !suspensionInEffectAt(time) &&
+      appGroups(groupName).shouldBeKilled(spentMinutes, time)
+
+  private def suspensionInEffectAt(time: LocalTime): Boolean = suspendedTimeRange match {
+    case Some(range) => range.contains(time)
+    case None => false
   }
 
   private def minutesToTimeString(minutes: Double): String =
@@ -146,5 +176,11 @@ class Atlatl extends Actor with ActorLogging {
     }
     sounds(soundFileName).setFramePosition(0)
     sounds(soundFileName).start()
+  }
+
+  // doing this manually every time got too error-prone and verbose
+  implicit class LocalTimeHelper(x: LocalTime) {
+    def plusMinutes(minutes: Double): LocalTime =
+      x.plus(java.time.Duration.ofMillis((minutes * 60 * 1000).toLong))
   }
 }

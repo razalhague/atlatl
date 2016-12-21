@@ -29,6 +29,7 @@ import akka.actor.{Actor, ActorLogging}
 
 case class UpdateToolTip(tooltip: String)
 case object Exit
+case object Suspend
 
 class TrayActor extends Actor with ActorLogging {
   val trayIconFileName = "atlatl.png"
@@ -47,11 +48,12 @@ class TrayActor extends Actor with ActorLogging {
 
   def makePopupMenu(): PopupMenu = {
     val popup = new PopupMenu()
+    val suspendItem = new MenuItem("Suspend")
     val exitItem = new MenuItem("Exit")
-    exitItem.addActionListener((_: ActionEvent) => {
-      log.info("sending exit message to parent")
-      context.parent ! Exit
-    })
+    suspendItem.addActionListener((_: ActionEvent) => context.parent ! Suspend)
+    exitItem.addActionListener((_: ActionEvent) => context.parent ! Exit)
+    popup.add(suspendItem)
+    popup.addSeparator()
     popup.add(exitItem)
     popup
   }

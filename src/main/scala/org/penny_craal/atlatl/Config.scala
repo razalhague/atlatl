@@ -31,6 +31,8 @@ class Config private (
     val killSoundFilename: String,
     val alarmSoundFilename: String,
     val alarmThresholdMinutes: Double,
+    val suspensionDelayMinutes: Double,
+    val suspensionDurationMinutes: Double,
     val refreshMinutes: Double,
     val dailyResetTime: LocalTime
   ) {
@@ -54,6 +56,8 @@ object Config {
   private val killSound = "killSound"
   private val alarmSound = "alarmSound"
   private val alarmThresholdMinutes = "alarmThresholdMinutes"
+  private val suspensionDelayMinutes = "suspensionDelayMinutes"
+  private val suspensionDurationMinutes = "suspensionDurationMinutes"
   private val refreshMinutes = "refreshMinutes"
   private val forbiddenTimes = "forbiddenTimes"
   private val forbiddenTimeStart = "start"
@@ -79,6 +83,8 @@ object Config {
       configJson.get(killSound).asInstanceOf[String],
       configJson.get(alarmSound).asInstanceOf[String],
       configJson.get(alarmThresholdMinutes).asInstanceOf[Double],
+      configJson.get(suspensionDelayMinutes).asInstanceOf[Double],
+      configJson.get(suspensionDurationMinutes).asInstanceOf[Double],
       configJson.get(refreshMinutes).asInstanceOf[Double],
       LocalTime.parse(configJson.get(dailyResetTime).asInstanceOf[String])
     )

@@ -2,6 +2,8 @@
 	"killSound": "kill.wav",
 	"alarmSound": "alarm.wav",
 	"alarmThresholdMinutes": 10.0,
+	"suspensionDelayMinutes": 5.0,
+	"suspensionDurationMinutes": 45.0,
 	"refreshMinutes": 1.0,
 	"dailyResetTime": "06:00",
 	"groups": [
