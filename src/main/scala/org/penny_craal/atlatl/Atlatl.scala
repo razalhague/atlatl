@@ -83,16 +83,18 @@ object Atlatl {
             appGroups(groupName).shouldBeKilled(spentMinutes + conf.alarmThresholdMinutes, alarmTime) && // should be killed in $alarmThresholdMinutes
             !appGroups(groupName).shouldBeKilled(spentMinutes, currentTime) // but should not be killed right now
         }
+      val toBeKilled = for {
+        (groupName, spentMinutes) <- updatedGroupTimes if appGroups(groupName).shouldBeKilled(spentMinutes, currentTime)
+        pi <- apps if appGroups(groupName).processNames contains pi.getName
+      } yield pi.getPid.toInt
       updateTrayIconTooltip(trayTooltip(updatedGroupTimes, appGroups))
-      for ((groupName, spentMinutes) <- updatedGroupTimes if appGroups(groupName).shouldBeKilled(spentMinutes, currentTime)) {
-        for (pi <- apps if appGroups(groupName).processNames contains pi.getName) {
-          playSound(conf.killSoundFilename)
-          JProcesses.killProcess(pi.getPid.toInt)
-        }
-      }
       if (shouldAlarm) {
         playSound(conf.alarmSoundFilename)
       }
+      if (toBeKilled.nonEmpty) {
+        playSound(conf.killSoundFilename)
+      }
+      toBeKilled foreach JProcesses.killProcess
       if (sleepMinutes > 0) {
         Thread.sleep((sleepMinutes * 60 * 1000).toLong)
       }
