@@ -21,7 +21,7 @@
 package org.penny_craal.atlatl
 
 import java.awt.{SystemTray, TrayIcon}
-import java.io.{File, IOException}
+import java.io.File
 import java.time.{LocalDateTime, LocalTime}
 import javax.imageio.ImageIO
 import javax.sound.sampled.{AudioSystem, Clip}
@@ -31,77 +31,63 @@ import org.jutils.jprocesses.model.ProcessInfo
 
 import scala.collection.JavaConverters._
 import scala.io.Source
-import scala.util.{Failure, Success, Try}
 
 /**
   * @author Ville Jokela
   */
-object Atlatl {
+object Atlatl extends App {
   val configFileName = "config.json"
   val trayIconFileName = "atlatl.png"
 
+  private val conf = Config.parse(readConfig())
   /** Maps filename to Clip */
-  private val sounds = scala.collection.mutable.Map[String, Clip]()
+  private val sounds = setupAudioSystem(List(conf.alarmSoundFilename, conf.killSoundFilename))
+  private val trayIcon: TrayIcon = setupTrayIcon()
 
-  private var trayIcon: TrayIcon = _
+  val appGroups = (conf.appGroups map (appGroup => (appGroup.name, appGroup))).toMap
 
-  def main(args: Array[String]): Unit = {
-    readConfig() match {
-      case Success(conf) => run(conf)
-      case Failure(e) => println("Failed to read configuration file: " + e.getLocalizedMessage)
+  loop((conf.appGroups map (appGroup => (appGroup.name, 0.0))).toMap, LocalDateTime.now(), 0.0)
+
+  private def loop(groupTimes: Map[String, Double], lastRefresh: LocalDateTime, oldSleepMinutes: Double): Unit = {
+    val apps = for {
+      appGroup <- conf.appGroups
+      pi <- fetchRunningProcesses() if appGroup.processNames contains pi.getName
+    } yield pi
+    val now = LocalDateTime.now()
+    val refreshTimeRange = new TimeRange(lastRefresh.toLocalTime, now.toLocalTime) // assumes that the refresh takes less than a day
+    val sleepMinutes = conf.refreshMinutes - (refreshTimeRange.lengthMinutes - oldSleepMinutes)
+    def anyAppsRunningFromGroup(groupName: String) =
+      apps exists (appGroups(groupName).processNames contains _.getName)
+    val updatedGroupTimes =
+      if (refreshTimeRange.contains(conf.dailyResetTime))
+        groupTimes mapValues (_ => 0.0)
+      else
+        for ((groupName, spentMinutes) <- groupTimes)
+          yield (groupName, if (anyAppsRunningFromGroup(groupName)) spentMinutes + refreshTimeRange.lengthMinutes else spentMinutes)
+    val currentTime = LocalTime.now()
+    val alarmTime = currentTime.plusSeconds((conf.alarmThresholdMinutes * 60).toLong)
+    val shouldAlarm =
+      updatedGroupTimes exists { case (groupName, spentMinutes) =>
+        anyAppsRunningFromGroup(groupName) &&
+          appGroups(groupName).shouldBeKilled(spentMinutes + conf.alarmThresholdMinutes, alarmTime) && // should be killed in $alarmThresholdMinutes
+          !appGroups(groupName).shouldBeKilled(spentMinutes, currentTime) // but should not be killed right now
+      }
+    val toBeKilled = for {
+      (groupName, spentMinutes) <- updatedGroupTimes if appGroups(groupName).shouldBeKilled(spentMinutes, currentTime)
+      pi <- apps if appGroups(groupName).processNames contains pi.getName
+    } yield pi.getPid.toInt
+    updateTrayIconTooltip(trayTooltip(updatedGroupTimes, appGroups))
+    if (shouldAlarm) {
+      playSound(conf.alarmSoundFilename)
     }
-  }
-
-  private def run(confText: String): Unit = {
-    val conf = Config.parse(confText)
-    val appGroups = Map(conf.appGroups map (appGroup => (appGroup.name, appGroup)): _*)
-    
-    setupAudioSystem(List(conf.alarmSoundFilename, conf.killSoundFilename))
-    setupTrayIcon()
-
-    def loop(groupTimes: Map[String, Double], lastRefresh: LocalDateTime, oldSleepMinutes: Double): Unit = {
-      val apps = for {
-        appGroup <- conf.appGroups
-        pi <- fetchRunningProcesses() if appGroup.processNames contains pi.getName
-      } yield pi
-      val now = LocalDateTime.now()
-      val refreshTimeRange = new TimeRange(lastRefresh.toLocalTime, now.toLocalTime) // assumes that the refresh takes less than a day
-      val sleepMinutes = conf.refreshMinutes - (refreshTimeRange.lengthMinutes - oldSleepMinutes)
-      def anyAppsRunningFromGroup(groupName: String) =
-        apps exists (appGroups(groupName).processNames contains _.getName)
-      val updatedGroupTimes =
-        if (refreshTimeRange.contains(conf.dailyResetTime))
-          groupTimes mapValues (_ => 0.0)
-        else
-          for ((groupName, spentMinutes) <- groupTimes)
-            yield (groupName, if (anyAppsRunningFromGroup(groupName)) spentMinutes + refreshTimeRange.lengthMinutes else spentMinutes)
-      val currentTime = LocalTime.now()
-      val alarmTime = currentTime.plusSeconds((conf.alarmThresholdMinutes * 60).toLong)
-      val shouldAlarm =
-        updatedGroupTimes exists { case (groupName, spentMinutes) =>
-          anyAppsRunningFromGroup(groupName) &&
-            appGroups(groupName).shouldBeKilled(spentMinutes + conf.alarmThresholdMinutes, alarmTime) && // should be killed in $alarmThresholdMinutes
-            !appGroups(groupName).shouldBeKilled(spentMinutes, currentTime) // but should not be killed right now
-        }
-      val toBeKilled = for {
-        (groupName, spentMinutes) <- updatedGroupTimes if appGroups(groupName).shouldBeKilled(spentMinutes, currentTime)
-        pi <- apps if appGroups(groupName).processNames contains pi.getName
-      } yield pi.getPid.toInt
-      updateTrayIconTooltip(trayTooltip(updatedGroupTimes, appGroups))
-      if (shouldAlarm) {
-        playSound(conf.alarmSoundFilename)
-      }
-      if (toBeKilled.nonEmpty) {
-        playSound(conf.killSoundFilename)
-      }
-      toBeKilled foreach JProcesses.killProcess
-      if (sleepMinutes > 0) {
-        Thread.sleep((sleepMinutes * 60 * 1000).toLong)
-      }
-      loop(updatedGroupTimes, now, sleepMinutes)
+    if (toBeKilled.nonEmpty) {
+      playSound(conf.killSoundFilename)
     }
-
-    loop(Map(conf.appGroups map (appGroup => (appGroup.name, 0.0)): _*), LocalDateTime.now(), 0.0)
+    toBeKilled foreach JProcesses.killProcess
+    if (sleepMinutes > 0) {
+      Thread.sleep((sleepMinutes * 60 * 1000).toLong)
+    }
+    loop(updatedGroupTimes, now, sleepMinutes)
   }
 
   private def trayTooltip(updatedGroupTimes: Map[String, Double], appGroups: Map[String, AppGroup]) = {
@@ -123,12 +109,10 @@ object Atlatl {
   private def minutesToTimeString(minutes: Double): String =
     f"${(minutes / 60).floor}%1.0f:${(minutes % 60).floor}%02.0f:${(minutes % 1 * 60).floor}%02.0f"
 
-  private def readConfig(): Try[String] = {
+  private def readConfig(): String = {
     val configFile = Source.fromFile(configFileName)
     try {
-      Success(configFile.mkString)
-    } catch {
-      case e: IOException => Failure(e)
+      configFile.mkString
     } finally {
       configFile.close()
     }
@@ -138,11 +122,12 @@ object Atlatl {
     JProcesses.getProcessList.asScala
   }
 
-  private def setupAudioSystem(soundFileNames: Seq[String]): Unit = {
-    for (sfn <- soundFileNames) {
-      sounds(sfn) = AudioSystem.getClip()
-      sounds(sfn).open(AudioSystem.getAudioInputStream(new File(sfn)))
-    }
+  private def setupAudioSystem(soundFileNames: Seq[String]): Map[String, Clip] = {
+    (soundFileNames map { sfn =>
+      val clip = AudioSystem.getClip()
+      clip.open(AudioSystem.getAudioInputStream(new File(sfn)))
+      (sfn, clip)
+    }).toMap
   }
 
   private def playSound(soundFileName: String): Unit = {
@@ -153,10 +138,13 @@ object Atlatl {
     sounds(soundFileName).start()
   }
 
-  private def setupTrayIcon(): Unit = {
+  private def setupTrayIcon(): TrayIcon = {
     if (SystemTray.isSupported) {
-      trayIcon = new TrayIcon(ImageIO.read(getClass.getResource("/" + trayIconFileName)))
-      SystemTray.getSystemTray.add(trayIcon)
+      val ti = new TrayIcon(ImageIO.read(getClass.getResource("/" + trayIconFileName)))
+      SystemTray.getSystemTray.add(ti)
+      ti
+    } else {
+      _
     }
   }
 
