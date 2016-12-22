@@ -1,4 +1,5 @@
 {
+	"hideExitMenuItem": false,
 	"killSound": "kill.wav",
 	"alarmSound": "alarm.wav",
 	"alarmThresholdMinutes": 10.0,

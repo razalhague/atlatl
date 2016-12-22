@@ -47,7 +47,7 @@ class Atlatl extends Actor with ActorLogging {
   private val conf = Config.parse(readConfig())
   /** Maps filename to Clip */
   private val sounds = setupAudioSystem(List(conf.alarmSoundFilename, conf.killSoundFilename))
-  private val trayActor = context.actorOf(Props[TrayActor], "trayActor")
+  private val trayActor = context.actorOf(Props(classOf[TrayActor], conf), "trayActor")
 
   private val appGroups = (conf.appGroups map (appGroup => (appGroup.name, appGroup))).toMap
 

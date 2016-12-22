@@ -31,7 +31,7 @@ case class UpdateToolTip(tooltip: String)
 case object Exit
 case object Suspend
 
-class TrayActor extends Actor with ActorLogging {
+class TrayActor(private val conf: Config) extends Actor with ActorLogging {
   val trayIconFileName = "atlatl.png"
 
   if (!SystemTray.isSupported) {
@@ -53,8 +53,10 @@ class TrayActor extends Actor with ActorLogging {
     suspendItem.addActionListener((_: ActionEvent) => context.parent ! Suspend)
     exitItem.addActionListener((_: ActionEvent) => context.parent ! Exit)
     popup.add(suspendItem)
-    popup.addSeparator()
-    popup.add(exitItem)
+    if (!conf.hideExitMenuItem) {
+      popup.addSeparator()
+      popup.add(exitItem)
+    }
     popup
   }
 
