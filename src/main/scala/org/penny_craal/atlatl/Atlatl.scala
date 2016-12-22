@@ -22,6 +22,7 @@ package org.penny_craal.atlatl
 
 import java.io.File
 import java.time.LocalTime
+import java.time.temporal.ChronoUnit
 import javax.sound.sampled.{AudioSystem, Clip}
 
 import akka.actor.{Actor, ActorLogging, ActorSystem, Props, ReceiveTimeout}
@@ -98,7 +99,7 @@ class Atlatl extends Actor with ActorLogging {
         (groupName, spentMinutes) <- groupTimes if shouldKillGroupAt(groupName, refreshTime, spentMinutes)
         pi <- apps if appGroups(groupName).processNames contains pi.getName
       } yield pi.getPid.toInt
-      trayActor ! UpdateToolTip(trayTooltip(groupTimes))
+      trayActor ! UpdateToolTip(trayTooltip(groupTimes, refreshTime))
       if (shouldAlarm) {
         playSound(conf.alarmSoundFilename)
       }
@@ -112,30 +113,33 @@ class Atlatl extends Actor with ActorLogging {
       prevGroupTimes = groupTimes
   }
 
-  private def trayTooltip(groupTimes: Map[String, Double]) = {
+  private def trayTooltip(groupTimes: Map[String, Double], now: LocalTime) = {
     val suspension = suspendedTimeRange match {
-      case Some(time) => "suspension scheduled during " + time + "\n"
+      case Some(suspensionRange) => "suspension: " + (
+        if (!suspensionRange.contains(now))
+          minutesToTimeString(suspensionRange.lengthMinutes) + " starts in " + minutesToTimeString(now.until(suspensionRange.start, ChronoUnit.SECONDS) / 60.0)
+        else
+          minutesToTimeString(new TimeRange(now, suspensionRange.end).lengthMinutes) + " left"
+      )
       case None => ""
     }
     val groupDescriptions = groupTimes map { case (groupName, spentMinutes) =>
       val dailyAllowance = appGroups(groupName).dailyMinutes match {
-        case Some(allowedMinutes) => minutesToTimeString(spentMinutes) + "/" + minutesToTimeString(allowedMinutes)
+        case Some(allowedMinutes) => minutesToTimeString(allowedMinutes - spentMinutes) + " left"
         case None => ""
       }
       val forbiddenTimes =
         if (appGroups(groupName).forbiddenTimes.nonEmpty)
-          "forbidden during [" + (appGroups(groupName).forbiddenTimes map (_.toString) reduce (_ + ", " + _)) + "]"
+          "forbidden at [" + separateNonEmpties(", ", appGroups(groupName).forbiddenTimes map (_.toString): _*) + "]"
         else
           ""
-      val groupLimits =
-        if (dailyAllowance.nonEmpty && forbiddenTimes.nonEmpty)
-          dailyAllowance + ", " + forbiddenTimes
-        else
-          dailyAllowance + forbiddenTimes // one or both of these are empty, so no separator necessary
-      groupName + ": " + groupLimits
-    } reduce (_ + "\n" + _) // separate groups with newlines
-    suspension + groupDescriptions // if suspension is non-empty, it contains a newline to separate it from the descriptions
+      groupName + ": " + separateNonEmpties(", ", dailyAllowance, forbiddenTimes)
+    }
+    separateNonEmpties("\n", suspension +: groupDescriptions.toSeq: _*)
   }
+
+  private def separateNonEmpties(separator: String, strings: String*) =
+    strings filter (_.nonEmpty) reduce (_ + separator + _)
 
   private def shouldKillGroupAt(groupName: String, time: LocalTime, spentMinutes: Double): Boolean =
     !suspensionInEffectAt(time) &&
@@ -146,8 +150,14 @@ class Atlatl extends Actor with ActorLogging {
     case None => false
   }
 
-  private def minutesToTimeString(minutes: Double): String =
-    f"${(minutes / 60).floor}%1.0f:${(minutes % 60).floor}%02.0f:${(minutes % 1 * 60).floor}%02.0f"
+  private def minutesToTimeString(minutes: Double): String = {
+    if (Math.abs(minutes) > 120)
+      f"${(minutes / 60).floor}%1.0f h"
+    else if (Math.abs(minutes) > 2)
+      f"${minutes.floor}%1.0f m"
+    else // less than two minutes left
+      f"${(minutes * 60).floor}%1.0f s"
+  }
 
   private def readConfig(): String = {
     val configFile = Source.fromFile(configFileName)
