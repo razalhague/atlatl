@@ -54,17 +54,17 @@ class Atlatl extends Actor with ActorLogging {
   private var prevRefreshTime = LocalTime.now()
   private var prevTimeoutMinutes = 0.0
   private var prevGroupTimes = (conf.appGroups map (appGroup => (appGroup.name, 0.0))).toMap
-  private var suspendedTimeRange: Option[TimeRange] = None
+  private var suspendedTimeRanges = Seq[TimeRange]()
   context.setReceiveTimeout(1.milli)
 
   override def receive: Receive = {
     case Suspend =>
       log.info("suspension engaged")
       val currentTime = LocalTime.now()
-      suspendedTimeRange = Some(new TimeRange(
+      suspendedTimeRanges = suspendedTimeRanges :+ new TimeRange(
         currentTime.plusMinutes(conf.suspensionDelayMinutes),
         currentTime.plusMinutes(conf.suspensionDurationMinutes + conf.suspensionDelayMinutes)
-      ))
+      )
       context.setReceiveTimeout(1.milli) // to update the tooltip and everything else ASAP
     case Exit =>
       log.info("exiting...")
@@ -77,9 +77,9 @@ class Atlatl extends Actor with ActorLogging {
       val refreshTime = LocalTime.now()
       val refreshTimeRange = new TimeRange(prevRefreshTime, refreshTime) // assumes that the refresh takes less than a day
       val timeoutMinutes = Math.max(conf.refreshMinutes - (refreshTimeRange.lengthMinutes - prevTimeoutMinutes), 1.0 / 60.0 / 1000.0) // timeout must be at least one millisecond
-      if (!(suspensionInEffectAt(refreshTime) || suspensionInEffectAt(refreshTime.plusMinutes(conf.suspensionDelayMinutes)))) {
-        suspendedTimeRange = None
-      }
+      suspendedTimeRanges = suspendedTimeRanges filter (suspension =>
+        suspension.contains(refreshTime) || suspension.contains(refreshTime.plusMinutes(conf.suspensionDelayMinutes))
+      )
       def anyAppsRunningFromGroup(groupName: String) =
         apps exists (appGroups(groupName).processNames contains _.getName)
       val groupTimes =
@@ -114,15 +114,14 @@ class Atlatl extends Actor with ActorLogging {
   }
 
   private def trayTooltip(groupTimes: Map[String, Double], now: LocalTime) = {
-    val suspension = suspendedTimeRange match {
-      case Some(suspensionRange) => "suspension: " + (
+    val suspensions = suspendedTimeRanges map (suspensionRange =>
+      "suspension: " + (
         if (!suspensionRange.contains(now))
           minutesToTimeString(suspensionRange.lengthMinutes) + " starts in " + minutesToTimeString(now.until(suspensionRange.start, ChronoUnit.SECONDS) / 60.0)
         else
           minutesToTimeString(new TimeRange(now, suspensionRange.end).lengthMinutes) + " left"
       )
-      case None => ""
-    }
+    )
     val groupDescriptions = groupTimes map { case (groupName, spentMinutes) =>
       val dailyAllowance = appGroups(groupName).dailyMinutes match {
         case Some(allowedMinutes) => minutesToTimeString(allowedMinutes - spentMinutes) + " left"
@@ -135,7 +134,7 @@ class Atlatl extends Actor with ActorLogging {
           ""
       groupName + ": " + separateNonEmpties(", ", dailyAllowance, forbiddenTimes)
     }
-    separateNonEmpties("\n", suspension +: groupDescriptions.toSeq: _*)
+    separateNonEmpties("\n", suspensions ++ groupDescriptions: _*)
   }
 
   private def separateNonEmpties(separator: String, strings: String*) =
@@ -145,10 +144,8 @@ class Atlatl extends Actor with ActorLogging {
     !suspensionInEffectAt(time) &&
       appGroups(groupName).shouldBeKilled(spentMinutes, time)
 
-  private def suspensionInEffectAt(time: LocalTime): Boolean = suspendedTimeRange match {
-    case Some(range) => range.contains(time)
-    case None => false
-  }
+  private def suspensionInEffectAt(time: LocalTime): Boolean =
+    suspendedTimeRanges exists (_.contains(time))
 
   private def minutesToTimeString(minutes: Double): String = {
     if (Math.abs(minutes) > 120)
