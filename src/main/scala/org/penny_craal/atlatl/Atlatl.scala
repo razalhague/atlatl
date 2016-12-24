@@ -22,7 +22,6 @@ package org.penny_craal.atlatl
 
 import java.io.File
 import java.time.LocalTime
-import java.time.temporal.ChronoUnit
 import javax.sound.sampled.{AudioSystem, Clip}
 
 import akka.actor.{Actor, ActorLogging, ActorSystem, Props, ReceiveTimeout}
@@ -117,9 +116,9 @@ class Atlatl extends Actor with ActorLogging {
     val suspensions = suspendedTimeRanges map (suspensionRange =>
       "suspension: " + (
         if (!suspensionRange.contains(now))
-          minutesToTimeString(suspensionRange.lengthMinutes) + " starts in " + minutesToTimeString(now.until(suspensionRange.start, ChronoUnit.SECONDS) / 60.0)
+          minutesToTimeString(suspensionRange.lengthMinutes) + " starts in " + minutesToTimeString(now until suspensionRange.start)
         else
-          minutesToTimeString(new TimeRange(now, suspensionRange.end).lengthMinutes) + " left"
+          minutesToTimeString(now until suspensionRange.end) + " left"
       )
     )
     val groupDescriptions = groupTimes map { case (groupName, spentMinutes) =>
@@ -185,9 +184,12 @@ class Atlatl extends Actor with ActorLogging {
     sounds(soundFileName).start()
   }
 
-  // doing this manually every time got too error-prone and verbose
+  // doing these manually every time got too error-prone and verbose
   implicit class LocalTimeHelper(x: LocalTime) {
     def plusMinutes(minutes: Double): LocalTime =
       x.plus(java.time.Duration.ofMillis((minutes * 60 * 1000).toLong))
+
+    def until(lt: LocalTime): Double =
+      new TimeRange(x, lt).lengthMinutes
   }
 }
