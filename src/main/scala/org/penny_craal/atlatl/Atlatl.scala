@@ -37,7 +37,7 @@ import scala.io.Source
   */
 object Atlatl extends App {
   private val system = ActorSystem("atlatl-system")
-  private val atlatl = system.actorOf(Props[Atlatl], "atlatl")
+  system.actorOf(Props[Atlatl], "atlatl")
 }
 
 class Atlatl extends Actor with ActorLogging {
@@ -186,6 +186,11 @@ class Atlatl extends Actor with ActorLogging {
     }
     sounds(soundFileName).setFramePosition(0)
     sounds(soundFileName).start()
+  }
+
+  override def postStop(): Unit = {
+    sounds.values foreach { _.close() }
+    sys.exit()
   }
 
   // doing these manually every time got too error-prone and verbose
