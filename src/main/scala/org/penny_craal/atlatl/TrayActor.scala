@@ -23,7 +23,7 @@ package org.penny_craal.atlatl
 import java.awt.event.ActionEvent
 import java.awt.{MenuItem, PopupMenu, SystemTray, TrayIcon}
 import javax.imageio.ImageIO
-import javax.swing.SwingUtilities
+import javax.swing.{ImageIcon, JOptionPane, SwingUtilities}
 
 import akka.actor.{Actor, ActorLogging}
 
@@ -42,7 +42,9 @@ class TrayActor(private val conf: Config) extends Actor with ActorLogging {
     throw new UnsupportedOperationException("System tray is not supported.")
   }
 
-  private val trayIcon: TrayIcon = new TrayIcon(ImageIO.read(getClass.getResource("/" + trayIconFileName)))
+  private val iconFile = ImageIO.read(getClass.getResource("/" + trayIconFileName))
+  private val icon = new ImageIcon(iconFile)
+  private val trayIcon: TrayIcon = new TrayIcon(iconFile)
 
   SwingUtilities.invokeLater(() => {
     trayIcon.setPopupMenu(makePopupMenu())
@@ -50,18 +52,39 @@ class TrayActor(private val conf: Config) extends Actor with ActorLogging {
     log.info("system tray set up")
   })
 
-  def makePopupMenu(): PopupMenu = {
+  private def makePopupMenu(): PopupMenu = {
     val popup = new PopupMenu()
+    val aboutItem = new MenuItem("About")
     val suspendItem = new MenuItem("Suspend")
     val exitItem = new MenuItem("Exit")
+    aboutItem.addActionListener((_: ActionEvent) => displayAboutDialog())
     suspendItem.addActionListener((_: ActionEvent) => context.parent ! Suspend)
     exitItem.addActionListener((_: ActionEvent) => context.parent ! Exit)
+    popup.add(aboutItem)
     popup.add(suspendItem)
     if (!conf.hideExitMenuItem) {
       popup.addSeparator()
       popup.add(exitItem)
     }
     popup
+  }
+
+  private def displayAboutDialog() = {
+    val aboutMsg =
+      "Atlatl, The Loud Application Time Limiter\n" +
+      "Copyright (C) 2016, 2017  Ville Jokela\n\n" +
+      "This program is free software: you can redistribute it and/or modify\n" +
+      "it under the terms of the GNU General Public License as published by\n" +
+      "the Free Software Foundation, either version 3 of the License, or\n" +
+      "(at your option) any later version.\n\n" +
+      "This program is distributed in the hope that it will be useful,\n" +
+      "but WITHOUT ANY WARRANTY; without even the implied warranty of\n" +
+      "MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the\n" +
+      "GNU General Public License for more details.\n\n" +
+      "You should have received a copy of the GNU General Public License\n" +
+      "along with this program.  If not, see <http://www.gnu.org/licenses/>."
+    // JOptionPane.showMessageDialog() blocks until the user clicks ok, so let's execute it in a separate thread.
+    new Thread(() => JOptionPane.showMessageDialog(null, aboutMsg, "About atlatl", JOptionPane.INFORMATION_MESSAGE, icon)).start()
   }
 
   override def receive: Receive = {
