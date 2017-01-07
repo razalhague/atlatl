@@ -46,7 +46,11 @@ class Atlatl extends Actor with ActorLogging {
   private val conf = Config.parse(readConfig())
   /** Maps filename to Clip */
   private val sounds = setupAudioSystem(List(conf.alarmSoundFilename, conf.killSoundFilename))
-  private val trayActor = context.actorOf(Props(classOf[TrayActor], conf), "trayActor")
+  private val trayActor =
+    if (TrayActor.isSupported)
+      Some(context.actorOf(Props(classOf[TrayActor], conf), "trayActor"))
+    else
+      None
 
   private val appGroups = (conf.appGroups map (appGroup => (appGroup.name, appGroup))).toMap
 
@@ -98,7 +102,7 @@ class Atlatl extends Actor with ActorLogging {
         (groupName, spentMinutes) <- groupTimes if shouldKillGroupAt(groupName, refreshTime, spentMinutes)
         pi <- apps if appGroups(groupName).processNames contains pi.getName
       } yield pi.getPid.toInt
-      trayActor ! UpdateToolTip(trayTooltip(groupTimes, refreshTime))
+      trayActor foreach (_ ! UpdateToolTip(trayTooltip(groupTimes, refreshTime)))
       if (shouldAlarm) {
         playSound(conf.alarmSoundFilename)
       }

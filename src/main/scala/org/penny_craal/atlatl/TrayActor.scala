@@ -31,10 +31,14 @@ case class UpdateToolTip(tooltip: String)
 case object Exit
 case object Suspend
 
+object TrayActor {
+  def isSupported: Boolean = SystemTray.isSupported
+}
+
 class TrayActor(private val conf: Config) extends Actor with ActorLogging {
   val trayIconFileName = "atlatl.png"
 
-  if (!SystemTray.isSupported) {
+  if (!TrayActor.isSupported) {
     throw new UnsupportedOperationException("System tray is not supported.")
   }
 
