@@ -21,14 +21,17 @@
 package org.penny_craal.atlatl
 
 import java.io.File
-import java.time.LocalTime
+import java.time.{LocalDateTime, LocalTime}
 import javax.sound.sampled.{AudioSystem, Clip}
 
 import akka.actor.{Actor, ActorLogging, ActorSystem, Props, ReceiveTimeout}
+import akka.pattern.ask
+import akka.util.Timeout
 import org.jutils.jprocesses.JProcesses
 import org.jutils.jprocesses.model.ProcessInfo
 
 import scala.collection.JavaConverters._
+import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.io.Source
 
@@ -51,12 +54,13 @@ class Atlatl extends Actor with ActorLogging {
       Some(context.actorOf(Props(classOf[TrayActor], conf), "trayActor"))
     else
       None
+  private val persistenceActor = context.actorOf(Props(classOf[PersistenceActor], conf), "persistenceActor")
 
   private val appGroups = (conf.appGroups map (appGroup => (appGroup.name, appGroup))).toMap
 
+  private var prevGroupTimes = loadGroupTimes()
   private var prevRefreshTime = LocalTime.now()
   private var prevTimeoutMinutes = 0.0
-  private var prevGroupTimes = (conf.appGroups map (appGroup => (appGroup.name, 0.0))).toMap
   private var suspendedTimeRanges = Seq[TimeRange]()
   context.setReceiveTimeout(1.milli)
 
@@ -77,7 +81,8 @@ class Atlatl extends Actor with ActorLogging {
         appGroup <- conf.appGroups
         pi <- fetchRunningProcesses() if appGroup.processNames contains pi.getName
       } yield pi
-      val refreshTime = LocalTime.now()
+      val refreshDateTime = LocalDateTime.now()
+      val refreshTime = refreshDateTime.toLocalTime
       val refreshTimeRange = new TimeRange(prevRefreshTime, refreshTime) // assumes that the refresh takes less than a day
       val timeoutMinutes = Math.max(conf.refreshMinutes - (refreshTimeRange.lengthMinutes - prevTimeoutMinutes), 1.0 / 60.0 / 1000.0) // timeout must be at least one millisecond
       suspendedTimeRanges = suspendedTimeRanges filter (suspension =>
@@ -114,6 +119,7 @@ class Atlatl extends Actor with ActorLogging {
       prevRefreshTime = refreshTime
       prevTimeoutMinutes = timeoutMinutes
       prevGroupTimes = groupTimes
+      persistenceActor ! SaveGroupTimes(groupTimes, refreshDateTime)
   }
 
   private def trayTooltip(groupTimes: Map[String, Double], now: LocalTime) = {
@@ -186,6 +192,30 @@ class Atlatl extends Actor with ActorLogging {
     }
     sounds(soundFileName).setFramePosition(0)
     sounds(soundFileName).start()
+  }
+
+  private def loadGroupTimes(): Map[String, Double] = {
+    implicit val timeout: Timeout = Timeout(1.minute)
+    lazy val emptyGroupTimes = (conf.appGroups map (appGroup => (appGroup.name, 0.0))).toMap
+    trayActor foreach (_ ! UpdateToolTip("Loading data..."))
+    val future = persistenceActor ? LoadGroupTimes
+    Await.result(future, timeout.duration) match {
+      case Some((saveTime: LocalDateTime, groupTimes: Map[String, Double])) =>
+        if (dataValidAt(saveTime, LocalDateTime.now()))
+          (conf.appGroups map (appGroup => (appGroup.name, groupTimes.getOrElse(appGroup.name, 0.0)))).toMap
+        else // data is outdated
+          emptyGroupTimes
+      case None => emptyGroupTimes
+    }
+  }
+
+  private def dataValidAt(saveTime: LocalDateTime, referenceTime: LocalDateTime): Boolean = {
+    val lastResetTime =
+      if (conf.dailyResetTime.isBefore(referenceTime.toLocalTime)) // check that we haven't already reset today
+        conf.dailyResetTime.atDate(referenceTime.toLocalDate) // use today's reset time
+      else
+        conf.dailyResetTime.atDate(referenceTime.toLocalDate.minusDays(1)) // use yesterday's reset time
+    saveTime.isAfter(lastResetTime)
   }
 
   override def postStop(): Unit = {

@@ -13,9 +13,6 @@ AFAIK this should work on linux and mac as well, but only Windows has been teste
 TODO
 ====
 
-* Split code into multiple files.
-* Carry accumulated time over program termination. At the moment the program assumes you don't shutdown your computer. Restarting the program resets the accumulated time.
 * Configuration GUI.
 * Different sized icons?
 * automate turning the SVG into a PNG
-* Kill countermeasures? Currently this program's only defense against termination is that it doesn't provide an exit button.

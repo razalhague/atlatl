@@ -29,6 +29,7 @@ import scala.collection.JavaConverters.asScalaIterator
 class Config private (
     val appGroups: Seq[AppGroup],
     val hideExitMenuItem: Boolean,
+    val dataFile: Option[String],
     val killSoundFilename: String,
     val alarmSoundFilename: String,
     val alarmThresholdMinutes: Double,
@@ -51,6 +52,7 @@ class Config private (
 object Config {
   // constants for JSON field names
   private val hideExitMenuItem = "hideExitMenuItem"
+  private val dataFile = "dataFile"
   private val groups = "groups"
   private val name = "name"
   private val dailyMinutes = "dailyMinutes"
@@ -83,6 +85,7 @@ object Config {
     new Config(
       appGroups.toSeq,
       configJson.get(hideExitMenuItem).asInstanceOf[Boolean],
+      if (configJson.containsKey(dataFile)) Some(configJson.get(dataFile).asInstanceOf[String]) else None,
       configJson.get(killSound).asInstanceOf[String],
       configJson.get(alarmSound).asInstanceOf[String],
       configJson.get(alarmThresholdMinutes).asInstanceOf[Double],
