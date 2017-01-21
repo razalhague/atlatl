@@ -20,20 +20,19 @@
 
 package org.penny_craal.atlatl
 
-import java.io.File
 import java.time.{LocalDateTime, LocalTime}
 import javax.sound.sampled.{AudioSystem, Clip}
 
 import akka.actor.{Actor, ActorLogging, ActorSystem, Props, ReceiveTimeout}
 import akka.pattern.ask
 import akka.util.Timeout
+import better.files.File
 import org.jutils.jprocesses.JProcesses
 import org.jutils.jprocesses.model.ProcessInfo
 
 import scala.collection.JavaConverters._
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import scala.io.Source
 
 /**
   * @author Ville Jokela
@@ -46,7 +45,7 @@ object Atlatl extends App {
 class Atlatl extends Actor with ActorLogging {
   val configFileName = "config.json"
 
-  private val conf = Config.parse(readConfig())
+  private val conf = Config.parse(File(configFileName).contentAsString)
   /** Maps filename to Clip */
   private val sounds = setupAudioSystem(List(conf.alarmSoundFilename, conf.killSoundFilename))
   private val trayActor =
@@ -165,15 +164,6 @@ class Atlatl extends Actor with ActorLogging {
       f"${(minutes * 60).floor}%1.0f s"
   }
 
-  private def readConfig(): String = {
-    val configFile = Source.fromFile(configFileName)
-    try {
-      configFile.mkString
-    } finally {
-      configFile.close()
-    }
-  }
-
   private def fetchRunningProcesses(): Seq[ProcessInfo] = {
     JProcesses.getProcessList.asScala
   }
@@ -181,7 +171,7 @@ class Atlatl extends Actor with ActorLogging {
   private def setupAudioSystem(soundFileNames: Seq[String]): Map[String, Clip] = {
     (soundFileNames map { sfn =>
       val clip = AudioSystem.getClip()
-      clip.open(AudioSystem.getAudioInputStream(new File(sfn)))
+      clip.open(AudioSystem.getAudioInputStream(File(sfn).uri.toURL))
       (sfn, clip)
     }).toMap
   }
