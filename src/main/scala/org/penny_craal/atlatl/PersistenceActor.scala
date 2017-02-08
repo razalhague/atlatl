@@ -44,16 +44,28 @@ class PersistenceActor(private val conf: Config) extends Actor with ActorLogging
   }
 
   private def loadData(): Option[(LocalDateTime, Map[String, Double])] = {
-    if (file.isReadable) {
-      val json = JSONValue.parse(file.contentAsString).asInstanceOf[JSONObject]
-      val saveTime = LocalDateTime.parse(json.get(timestampKey).asInstanceOf[String])
-      val groupTimes =
-        Map((asScalaIterator(json.get(groupTimesKey).asInstanceOf[JSONObject].entrySet().iterator) map (e =>
-          (e.getKey.asInstanceOf[String], e.getValue.asInstanceOf[Double])
-        )).toSeq: _*)
-      Some((saveTime, groupTimes))
-    } else {
-      None
+    try {
+      if (file.isReadable) {
+        val json = JSONValue.parse(file.contentAsString).asInstanceOf[JSONObject]
+        if (json != null) {
+          val saveTime = LocalDateTime.parse(json.get(timestampKey).asInstanceOf[String])
+          val groupTimes =
+            Map((asScalaIterator(json.get(groupTimesKey).asInstanceOf[JSONObject].entrySet().iterator) map (e =>
+              (e.getKey.asInstanceOf[String], e.getValue.asInstanceOf[Double])
+              )).toSeq: _*)
+          Some((saveTime, groupTimes))
+        } else {
+          log.warning("data file corrupted")
+          None
+        }
+      } else {
+        log.warning("data file not readable")
+        None
+      }
+    } catch {
+      case e: Exception =>
+        log.error(e, "failed to read data file")
+        None
     }
   }
 
