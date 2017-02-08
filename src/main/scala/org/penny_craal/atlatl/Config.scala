@@ -75,7 +75,7 @@ object Config {
       new AppGroup(
         jsonAppGroup.get(name).asInstanceOf[String],
         if (jsonAppGroup.containsKey(dailyMinutes))
-          Some(jsonAppGroup.get(dailyMinutes).asInstanceOf[Double])
+          Some(jsonAppGroup.get(dailyMinutes).asDoubleMinutes)
         else
           None,
         parseForbiddenTimes(jsonAppGroup),
@@ -88,10 +88,10 @@ object Config {
       if (configJson.containsKey(dataFile)) Some(configJson.get(dataFile).asInstanceOf[String]) else None,
       configJson.get(killSound).asInstanceOf[String],
       configJson.get(alarmSound).asInstanceOf[String],
-      configJson.get(alarmThresholdMinutes).asInstanceOf[Double],
-      configJson.get(suspensionDelayMinutes).asInstanceOf[Double],
-      configJson.get(suspensionDurationMinutes).asInstanceOf[Double],
-      configJson.get(refreshMinutes).asInstanceOf[Double],
+      configJson.get(alarmThresholdMinutes).asDoubleMinutes,
+      configJson.get(suspensionDelayMinutes).asDoubleMinutes,
+      configJson.get(suspensionDurationMinutes).asDoubleMinutes,
+      configJson.get(refreshMinutes).asDoubleMinutes,
       LocalTime.parse(configJson.get(dailyResetTime).asInstanceOf[String])
     )
   }
@@ -106,5 +106,13 @@ object Config {
       )).toSeq
     else
       Seq()
+  }
+
+  implicit class DoubleHelper(x: Any) {
+    def asDoubleMinutes: Double = x match {
+      case l: Long => l.toDouble
+      case d: Double => d
+      case other => throw new IllegalArgumentException("expected a number, got a " + other.getClass.getSimpleName)
+    }
   }
 }
