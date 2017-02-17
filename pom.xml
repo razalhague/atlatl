@@ -21,6 +21,13 @@
     <scala.compat.version>2.12.0</scala.compat.version>
   </properties>
 
+  <pluginRepositories>
+    <pluginRepository>
+      <id>svg-rasterizer-maven-plugin-mvn-repo</id>
+      <url>https://raw.githubusercontent.com/Argelbargel/svg-rasterizer-maven-plugin/mvn-repo/</url>
+    </pluginRepository>
+  </pluginRepositories>
+
   <dependencies>
     <dependency>
       <groupId>org.scala-lang</groupId>
@@ -108,6 +115,30 @@
             <goals>
               <goal>single</goal>
             </goals>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>jp.uphy.maven</groupId>
+        <artifactId>svg-maven-plugin</artifactId>
+        <version>1.0</version>
+        <executions>
+          <execution>
+            <id>Rasterize</id>
+            <goals>
+              <goal>rasterize</goal>
+            </goals>
+            <configuration>
+              <input>src/gfx/atlatl.svg</input>
+              <outputs>
+                <output>
+                  <path>src/main/resources/atlatl.png</path>
+                  <width>16</width>
+                  <height>16</height>
+                  <format>png</format>
+                </output>
+              </outputs>
+            </configuration>
           </execution>
         </executions>
       </plugin>
