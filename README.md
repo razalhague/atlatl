@@ -14,5 +14,3 @@ TODO
 ====
 
 * Configuration GUI.
-* Different sized icons?
-* automate turning the SVG into a PNG
