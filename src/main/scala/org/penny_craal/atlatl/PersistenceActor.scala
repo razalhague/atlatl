@@ -4,12 +4,12 @@ import java.time.LocalDateTime
 
 import akka.actor.{Actor, ActorLogging}
 import better.files._
-import org.json.simple.{JSONObject, JSONValue}
+import org.json.simple.{JSONArray, JSONObject, JSONValue}
 
 import scala.collection.JavaConverters._
 
 case class LoadGroupTimes(sender: Actor)
-case class SaveGroupTimes(groupTimes: Map[String, Double], time: LocalDateTime)
+case class SaveGroupTimes(groupTimes: Seq[GroupRuntimeInformation], time: LocalDateTime)
 
 /**
   * @author Ville Jokela
@@ -17,6 +17,8 @@ case class SaveGroupTimes(groupTimes: Map[String, Double], time: LocalDateTime)
 class PersistenceActor(private val conf: Config) extends Actor with ActorLogging {
   private val timestampKey = "timestamp"
   private val groupTimesKey = "groupTimes"
+  private val groupNameKey = "groupName"
+  private val spentMinutesKey = "spentMinutes"
 
   private val dataFolderName = "atlatl"
   private val dataFileName = "data.json"
@@ -43,16 +45,14 @@ class PersistenceActor(private val conf: Config) extends Actor with ActorLogging
     case SaveGroupTimes(groupTimes, timestamp) => saveData(groupTimes, timestamp)
   }
 
-  private def loadData(): Option[(LocalDateTime, Map[String, Double])] = {
+  private def loadData(): Option[(LocalDateTime, Seq[GroupRuntimeInformation])] = {
     try {
       if (file.isReadable) {
         val json = JSONValue.parse(file.contentAsString).asInstanceOf[JSONObject]
         if (json != null) {
           val saveTime = LocalDateTime.parse(json.get(timestampKey).asInstanceOf[String])
           val groupTimes =
-            Map((asScalaIterator(json.get(groupTimesKey).asInstanceOf[JSONObject].entrySet().iterator) map (e =>
-              (e.getKey.asInstanceOf[String], e.getValue.asInstanceOf[Double])
-              )).toSeq: _*)
+            (asScalaIterator(json.get(groupTimesKey).asInstanceOf[JSONArray].iterator()) map (_.asInstanceOf[JSONObject]) map jsonToGri).toSeq
           Some((saveTime, groupTimes))
         } else {
           log.warning("data file corrupted")
@@ -69,10 +69,10 @@ class PersistenceActor(private val conf: Config) extends Actor with ActorLogging
     }
   }
 
-  private def saveData(groupTimes: Map[String, Double], timestamp: LocalDateTime): Unit = {
+  private def saveData(groupTimes: Seq[GroupRuntimeInformation], timestamp: LocalDateTime): Unit = {
     val data = Map(
       timestampKey -> timestamp.toString,
-      groupTimesKey -> mapAsJavaMap[String,Double](groupTimes)
+      groupTimesKey -> (groupTimes map griToJson).asJava
     )
     log.info("writing groupTimes to file")
     if (file.isWriteable || file.notExists) {
@@ -81,5 +81,20 @@ class PersistenceActor(private val conf: Config) extends Actor with ActorLogging
     } else {
       log.warning("cannot write data to file")
     }
+  }
+
+  private def griToJson(gri: GroupRuntimeInformation): JSONObject = {
+    new JSONObject(Map(
+      groupNameKey -> gri.name,
+      spentMinutesKey -> gri.spentMinutes
+    ).asJava)
+  }
+
+  private def jsonToGri(jo: JSONObject) = {
+    GroupRuntimeInformation(
+      jo.get(groupNameKey).asInstanceOf[String],
+      jo.get(spentMinutesKey).asInstanceOf[Double],
+      0.0
+    )
   }
 }

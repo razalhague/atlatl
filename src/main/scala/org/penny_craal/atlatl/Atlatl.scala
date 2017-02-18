@@ -44,12 +44,14 @@ object Atlatl extends App {
 
 case object Tick
 
+case class GroupRuntimeInformation(name: String, spentMinutes: Double, continuousUseMinutes: Double)
+
 class Atlatl extends Actor with ActorLogging {
   val configFileName = "config.json"
 
   private val conf = Config.parse(File(configFileName).contentAsString)
   /** Maps filename to Clip */
-  private val sounds = setupAudioSystem(List(conf.alarmSoundFilename, conf.killSoundFilename))
+  private val sounds = setupAudioSystem(List(conf.continuousUseAlarmSoundFilename, conf.killAlarmSoundFilename, conf.killSoundFilename))
   private val trayActor =
     if (TrayActor.isSupported)
       Some(context.actorOf(Props(classOf[TrayActor], conf), "trayActor"))
@@ -62,6 +64,7 @@ class Atlatl extends Actor with ActorLogging {
   private var terminating = false
   private var prevGroupTimes = loadGroupTimes()
   private var prevRefreshTime = LocalTime.now()
+  private var prevApps = Seq[ProcessInfo]()
   private var suspendedTimeRanges = Seq[TimeRange]()
 
   import context.dispatcher
@@ -93,26 +96,44 @@ class Atlatl extends Actor with ActorLogging {
       )
       def anyAppsRunningFromGroup(groupName: String) =
         apps exists (appGroups(groupName).processNames contains _.getName)
+      def updatedContinuousUse(groupName: String, continuousUseMinutes: Double) = {
+        if (continuousUseMinutes < conf.continuousUseAlarmMinutes)
+          if ((prevApps map (_.getName) intersect (apps map (_.getName)) intersect appGroups(groupName).processNames).nonEmpty)
+            continuousUseMinutes + refreshTimeRange.lengthMinutes
+          else
+            continuousUseMinutes
+        else // we'll have already warned of long continuous use last time, so reset the timer
+          refreshTimeRange.lengthMinutes
+      }
       val groupTimes =
         if (refreshTimeRange.contains(conf.dailyResetTime))
-          prevGroupTimes mapValues (_ => 0.0)
+          prevGroupTimes map (gri => GroupRuntimeInformation(gri.name, 0.0, gri.continuousUseMinutes))
         else
-          for ((groupName, spentMinutes) <- prevGroupTimes)
-            yield (groupName, if (anyAppsRunningFromGroup(groupName)) spentMinutes + refreshTimeRange.lengthMinutes else spentMinutes)
+          for (GroupRuntimeInformation(groupName, spentMinutes, continuousUseMinutes) <- prevGroupTimes)
+            yield GroupRuntimeInformation(
+              groupName,
+              if (anyAppsRunningFromGroup(groupName)) spentMinutes + refreshTimeRange.lengthMinutes else spentMinutes,
+              updatedContinuousUse(groupName, continuousUseMinutes)
+            )
       val alarmTime = refreshTime.plusMinutes(conf.alarmThresholdMinutes)
-      val shouldAlarm =
-        groupTimes exists { case (groupName, spentMinutes) =>
+      val shouldKillAlarm =
+        groupTimes exists { case GroupRuntimeInformation(groupName, spentMinutes, _) =>
           anyAppsRunningFromGroup(groupName) &&
             shouldKillGroupAt(groupName, alarmTime, spentMinutes + conf.alarmThresholdMinutes) && // should be killed in $alarmThresholdMinutes
             !shouldKillGroupAt(groupName, refreshTime, spentMinutes) // but should not be killed right now
         }
+      val shouldContinuousUseAlarm =
+        groupTimes map (_.continuousUseMinutes) exists (_ >= conf.continuousUseAlarmMinutes)
       val toBeKilled = for {
-        (groupName, spentMinutes) <- groupTimes if shouldKillGroupAt(groupName, refreshTime, spentMinutes)
+        GroupRuntimeInformation(groupName, spentMinutes, _) <- groupTimes if shouldKillGroupAt(groupName, refreshTime, spentMinutes)
         pi <- apps if appGroups(groupName).processNames contains pi.getName
       } yield pi.getPid.toInt
       trayActor foreach (_ ! UpdateToolTip(trayTooltip(groupTimes, refreshTime)))
-      if (shouldAlarm) {
-        playSound(conf.alarmSoundFilename)
+      if (shouldKillAlarm) {
+        playSound(conf.killAlarmSoundFilename)
+      }
+      if (shouldContinuousUseAlarm) {
+        playSound(conf.continuousUseAlarmSoundFilename)
       }
       if (toBeKilled.nonEmpty) {
         playSound(conf.killSoundFilename)
@@ -120,10 +141,11 @@ class Atlatl extends Actor with ActorLogging {
       toBeKilled foreach JProcesses.killProcess
       prevRefreshTime = refreshTime
       prevGroupTimes = groupTimes
+      prevApps = apps
       persistenceActor ! SaveGroupTimes(groupTimes, refreshDateTime)
   }
 
-  private def trayTooltip(groupTimes: Map[String, Double], now: LocalTime) = {
+  private def trayTooltip(groupTimes: Seq[GroupRuntimeInformation], now: LocalTime) = {
     val suspensions = suspendedTimeRanges map (suspensionRange =>
       "suspension: " + (
         if (!suspensionRange.contains(now))
@@ -132,7 +154,7 @@ class Atlatl extends Actor with ActorLogging {
           minutesToTimeString(now until suspensionRange.end) + " left"
       )
     )
-    val groupDescriptions = groupTimes map { case (groupName, spentMinutes) =>
+    val groupDescriptions = groupTimes map { case GroupRuntimeInformation(groupName, spentMinutes, _) =>
       val dailyAllowance = appGroups(groupName).dailyMinutes match {
         case Some(allowedMinutes) => minutesToTimeString(allowedMinutes - spentMinutes) + " left"
         case None => ""
@@ -186,15 +208,22 @@ class Atlatl extends Actor with ActorLogging {
     sounds(soundFileName).start()
   }
 
-  private def loadGroupTimes(): Map[String, Double] = {
+  private def loadGroupTimes(): Seq[GroupRuntimeInformation] = {
     implicit val timeout: Timeout = Timeout(1.minute)
-    lazy val emptyGroupTimes = (conf.appGroups map (appGroup => (appGroup.name, 0.0))).toMap
+    lazy val emptyGroupTimes = conf.appGroups map (appGroup => GroupRuntimeInformation(appGroup.name, 0.0, 0.0))
     trayActor foreach (_ ! UpdateToolTip("Loading data..."))
     val future = persistenceActor ? LoadGroupTimes
     Await.result(future, timeout.duration) match {
-      case Some((saveTime: LocalDateTime, groupTimes: Map[String, Double])) =>
+      case Some((saveTime: LocalDateTime, groupTimes: Seq[GroupRuntimeInformation])) =>
         if (dataValidAt(saveTime, LocalDateTime.now()))
-          (conf.appGroups map (appGroup => (appGroup.name, groupTimes.getOrElse(appGroup.name, 0.0)))).toMap
+          // construct the new groupTimes list from the configuration file in case it has been changed since the last
+          // save, and the loaded groupTimes is either missing appGroups or has old appGroups that are no longer in
+          // the configuration
+          conf.appGroups map (appGroup => GroupRuntimeInformation(
+            appGroup.name,
+            groupTimes find (_.name == appGroup.name) map (_.spentMinutes) getOrElse 0.0,
+            0.0
+          ))
         else // data is outdated
           emptyGroupTimes
       case None => emptyGroupTimes

@@ -31,11 +31,13 @@ class Config private (
     val hideExitMenuItem: Boolean,
     val dataFile: Option[String],
     val killSoundFilename: String,
-    val alarmSoundFilename: String,
+    val killAlarmSoundFilename: String,
+    val continuousUseAlarmSoundFilename: String,
     val alarmThresholdMinutes: Double,
     val suspensionDelayMinutes: Double,
     val suspensionDurationMinutes: Double,
     val refreshMinutes: Double,
+    val continuousUseAlarmMinutes: Double,
     val dailyResetTime: LocalTime
   ) {
   for (appGroup <- appGroups; ft <- appGroup.forbiddenTimes if ft.lengthMinutes < alarmThresholdMinutes) {
@@ -58,11 +60,13 @@ object Config {
   private val dailyMinutes = "dailyMinutes"
   private val processNames = "processNames"
   private val killSound = "killSound"
-  private val alarmSound = "alarmSound"
+  private val killAlarmSound = "killAlarmSound"
+  private val continuousUseAlarmSound = "continuousUseAlarmSound"
   private val alarmThresholdMinutes = "alarmThresholdMinutes"
   private val suspensionDelayMinutes = "suspensionDelayMinutes"
   private val suspensionDurationMinutes = "suspensionDurationMinutes"
   private val refreshMinutes = "refreshMinutes"
+  private val continuousUseAlarmMinutes = "continuousUseAlarmMinutes"
   private val forbiddenTimes = "forbiddenTimes"
   private val forbiddenTimeStart = "start"
   private val forbiddenTimeEnd = "end"
@@ -87,11 +91,13 @@ object Config {
       configJson.get(hideExitMenuItem).asInstanceOf[Boolean],
       if (configJson.containsKey(dataFile)) Some(configJson.get(dataFile).asInstanceOf[String]) else None,
       configJson.get(killSound).asInstanceOf[String],
-      configJson.get(alarmSound).asInstanceOf[String],
+      configJson.get(killAlarmSound).asInstanceOf[String],
+      configJson.get(continuousUseAlarmSound).asInstanceOf[String],
       configJson.get(alarmThresholdMinutes).asDoubleMinutes,
       configJson.get(suspensionDelayMinutes).asDoubleMinutes,
       configJson.get(suspensionDurationMinutes).asDoubleMinutes,
       configJson.get(refreshMinutes).asDoubleMinutes,
+      configJson.get(continuousUseAlarmMinutes).asDoubleMinutes,
       LocalTime.parse(configJson.get(dailyResetTime).asInstanceOf[String])
     )
   }

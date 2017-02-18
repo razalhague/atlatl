@@ -1,16 +1,18 @@
 {
 	"hideExitMenuItem": false,
 	"killSound": "kill.wav",
-	"alarmSound": "alarm.wav",
-	"alarmThresholdMinutes": 10.0,
-	"suspensionDelayMinutes": 5.0,
-	"suspensionDurationMinutes": 45.0,
-	"refreshMinutes": 1.0,
+	"killAlarmSound": "alarm.wav",
+	"continuousUseAlarmSound": "continuous-alarm.wav",
+	"alarmThresholdMinutes": 10,
+	"suspensionDelayMinutes": 5,
+	"suspensionDurationMinutes": 45,
+	"refreshMinutes": 0.5,
+	"continuousUseAlarmMinutes": 15,
 	"dailyResetTime": "06:00",
 	"groups": [
 		{
 			"name": "Games",
-			"dailyMinutes": 60.0,
+			"dailyMinutes": 60,
 			"forbiddenTimes": [
 				{ "start": "03:00", "end": "12:00" }
 			],
