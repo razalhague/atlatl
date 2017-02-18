@@ -42,6 +42,8 @@ object Atlatl extends App {
   system.actorOf(Props[Atlatl], "atlatl")
 }
 
+case object Tick
+
 class Atlatl extends Actor with ActorLogging {
   val configFileName = "config.json"
 
@@ -57,11 +59,13 @@ class Atlatl extends Actor with ActorLogging {
 
   private val appGroups = (conf.appGroups map (appGroup => (appGroup.name, appGroup))).toMap
 
+  private var terminating = false
   private var prevGroupTimes = loadGroupTimes()
   private var prevRefreshTime = LocalTime.now()
-  private var prevTimeoutMinutes = 0.0
   private var suspendedTimeRanges = Seq[TimeRange]()
-  context.setReceiveTimeout(1.milli)
+
+  import context.dispatcher
+  private val tick = context.system.scheduler.schedule(1.milli, (conf.refreshMinutes * 60 * 1000).toLong.millis, self, Tick)
 
   override def receive: Receive = {
     case Suspend =>
@@ -71,11 +75,12 @@ class Atlatl extends Actor with ActorLogging {
         currentTime.plusMinutes(conf.suspensionDelayMinutes),
         currentTime.plusMinutes(conf.suspensionDurationMinutes + conf.suspensionDelayMinutes)
       )
-      context.setReceiveTimeout(1.milli) // to update the tooltip and everything else ASAP
     case Exit =>
       log.info("exiting...")
+      terminating = true
       context.system.terminate()
-    case ReceiveTimeout =>
+    case Tick =>
+      log.info("tick")
       val apps = for {
         appGroup <- conf.appGroups
         pi <- fetchRunningProcesses() if appGroup.processNames contains pi.getName
@@ -83,7 +88,6 @@ class Atlatl extends Actor with ActorLogging {
       val refreshDateTime = LocalDateTime.now()
       val refreshTime = refreshDateTime.toLocalTime
       val refreshTimeRange = new TimeRange(prevRefreshTime, refreshTime) // assumes that the refresh takes less than a day
-      val timeoutMinutes = Math.max(conf.refreshMinutes - (refreshTimeRange.lengthMinutes - prevTimeoutMinutes), 1.0 / 60.0 / 1000.0) // timeout must be at least one millisecond
       suspendedTimeRanges = suspendedTimeRanges filter (suspension =>
         suspension.contains(refreshTime) || suspension.contains(refreshTime.plusMinutes(conf.suspensionDelayMinutes))
       )
@@ -114,9 +118,7 @@ class Atlatl extends Actor with ActorLogging {
         playSound(conf.killSoundFilename)
       }
       toBeKilled foreach JProcesses.killProcess
-      context.setReceiveTimeout((timeoutMinutes * 60 * 1000).toLong.millis)
       prevRefreshTime = refreshTime
-      prevTimeoutMinutes = timeoutMinutes
       prevGroupTimes = groupTimes
       persistenceActor ! SaveGroupTimes(groupTimes, refreshDateTime)
   }
@@ -209,8 +211,13 @@ class Atlatl extends Actor with ActorLogging {
   }
 
   override def postStop(): Unit = {
+    tick.cancel()
     sounds.values foreach { _.close() }
-    sys.exit()
+    // the sound system leaves a thread alive that I cannot figure out how to terminate, which will leave the actor-
+    // system hanging in certain situations, so let's terminate the whole program here
+    if (terminating) {
+      sys.exit()
+    }
   }
 
   // doing these manually every time got too error-prone and verbose
