@@ -97,13 +97,19 @@ class Atlatl extends Actor with ActorLogging {
       def anyAppsRunningFromGroup(groupName: String) =
         apps exists (appGroups(groupName).processNames contains _.getName)
       def updatedContinuousUse(groupName: String, continuousUseMinutes: Double) = {
-        if (continuousUseMinutes < conf.continuousUseAlarmMinutes)
-          if ((prevApps map (_.getName) intersect (apps map (_.getName)) intersect appGroups(groupName).processNames).nonEmpty)
-            continuousUseMinutes + refreshTimeRange.lengthMinutes
+        if ((prevApps map (_.getName) intersect (apps map (_.getName)) intersect appGroups(groupName).processNames).nonEmpty)
+          if (continuousUseMinutes == 0.0)
+            // this is the first time after a reset that this process is found in both apps and prevApps
+            // it must have been running for two refresh intervals for this to happen
+            refreshTimeRange.lengthMinutes * 2
           else
-            continuousUseMinutes
-        else // we'll have already warned of long continuous use last time, so reset the timer
-          refreshTimeRange.lengthMinutes
+            if (continuousUseMinutes < conf.continuousUseAlarmMinutes)
+              continuousUseMinutes + refreshTimeRange.lengthMinutes
+            else
+              // we'll have warned of continuous use last refresh, so reduce the amount of time by the alarm interval
+              continuousUseMinutes - conf.continuousUseAlarmMinutes + refreshTimeRange.lengthMinutes
+        else
+          0.0
       }
       val groupTimes =
         if (refreshTimeRange.contains(conf.dailyResetTime))
