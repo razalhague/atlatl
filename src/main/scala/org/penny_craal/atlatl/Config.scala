@@ -58,6 +58,7 @@ object Config {
   private val groups = "groups"
   private val name = "name"
   private val dailyMinutes = "dailyMinutes"
+  private val trackContinuousUse = "trackContinuousUse"
   private val processNames = "processNames"
   private val killSound = "killSound"
   private val killAlarmSound = "killAlarmSound"
@@ -75,39 +76,37 @@ object Config {
   def parse(jsonText: String): Config = {
     // TODO: find native scala json library?
     val configJson = JSONValue.parse(jsonText).asInstanceOf[JSONObject]
-    val appGroups = asScalaIterator(configJson.get(groups).asInstanceOf[JSONArray].iterator()) map (_.asInstanceOf[JSONObject]) map (jsonAppGroup =>
+    val appGroups = asScalaIterator(configJson.getValue[JSONArray](groups).iterator()) map (_.asInstanceOf[JSONObject]) map (jsonAppGroup =>
       new AppGroup(
-        jsonAppGroup.get(name).asInstanceOf[String],
-        if (jsonAppGroup.containsKey(dailyMinutes))
-          Some(jsonAppGroup.get(dailyMinutes).asDoubleMinutes)
-        else
-          None,
+        jsonAppGroup.getValue[String](name),
+        jsonAppGroup.getOptional[Any](dailyMinutes) map (_.asDoubleMinutes),
+        jsonAppGroup.getOptional[Boolean](trackContinuousUse) getOrElse false,
         parseForbiddenTimes(jsonAppGroup),
-        (asScalaIterator(jsonAppGroup.get(processNames).asInstanceOf[JSONArray].iterator()) map (_.asInstanceOf[String])).toSeq
+        (asScalaIterator(jsonAppGroup.getValue[JSONArray](processNames).iterator()) map (_.asInstanceOf[String])).toSeq
       )
     )
     new Config(
       appGroups.toSeq,
-      configJson.get(hideExitMenuItem).asInstanceOf[Boolean],
-      if (configJson.containsKey(dataFile)) Some(configJson.get(dataFile).asInstanceOf[String]) else None,
-      configJson.get(killSound).asInstanceOf[String],
-      configJson.get(killAlarmSound).asInstanceOf[String],
-      configJson.get(continuousUseAlarmSound).asInstanceOf[String],
+      configJson.getValue[Boolean](hideExitMenuItem),
+      configJson.getOptional[String](dataFile),
+      configJson.getValue[String](killSound),
+      configJson.getValue[String](killAlarmSound),
+      configJson.getValue[String](continuousUseAlarmSound),
       configJson.get(alarmThresholdMinutes).asDoubleMinutes,
       configJson.get(suspensionDelayMinutes).asDoubleMinutes,
       configJson.get(suspensionDurationMinutes).asDoubleMinutes,
       configJson.get(refreshMinutes).asDoubleMinutes,
       configJson.get(continuousUseAlarmMinutes).asDoubleMinutes,
-      LocalTime.parse(configJson.get(dailyResetTime).asInstanceOf[String])
+      LocalTime.parse(configJson.getValue[String](dailyResetTime))
     )
   }
 
   private def parseForbiddenTimes(jsonAppGroup: JSONObject): Seq[TimeRange] = {
     if (jsonAppGroup.containsKey(forbiddenTimes))
-      (asScalaIterator(jsonAppGroup.get(forbiddenTimes).asInstanceOf[JSONArray].iterator()) map (_.asInstanceOf[JSONObject]) map (forbiddenTime =>
+      (asScalaIterator(jsonAppGroup.getValue[JSONArray](forbiddenTimes).iterator()) map (_.asInstanceOf[JSONObject]) map (forbiddenTime =>
         new TimeRange(
-          LocalTime.parse(forbiddenTime.get(forbiddenTimeStart).asInstanceOf[String]),
-          LocalTime.parse(forbiddenTime.get(forbiddenTimeEnd).asInstanceOf[String])
+          LocalTime.parse(forbiddenTime.getValue[String](forbiddenTimeStart)),
+          LocalTime.parse(forbiddenTime.getValue[String](forbiddenTimeEnd))
         )
       )).toSeq
     else
@@ -120,5 +119,16 @@ object Config {
       case d: Double => d
       case other => throw new IllegalArgumentException("expected a number, got a " + other.getClass.getSimpleName)
     }
+  }
+
+  implicit class JsonObjectHelper(jsonObject: JSONObject) {
+    def getValue[V](key: String): V =
+      jsonObject.get(key).asInstanceOf[V]
+
+    def getOptional[V](key: String): Option[V] =
+      if (jsonObject.containsKey(key))
+        Some(jsonObject.getValue[V](key))
+      else
+        None
   }
 }

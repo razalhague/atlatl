@@ -129,7 +129,7 @@ class Atlatl extends Actor with ActorLogging {
             !shouldKillGroupAt(groupName, refreshTime, spentMinutes) // but should not be killed right now
         }
       val shouldContinuousUseAlarm =
-        groupTimes map (_.continuousUseMinutes) exists (_ >= conf.continuousUseAlarmMinutes)
+        groupTimes exists (gri => appGroups(gri.name).trackContinuousUse && gri.continuousUseMinutes >= conf.continuousUseAlarmMinutes)
       val toBeKilled = for {
         GroupRuntimeInformation(groupName, spentMinutes, _) <- groupTimes if shouldKillGroupAt(groupName, refreshTime, spentMinutes)
         pi <- apps if appGroups(groupName).processNames contains pi.getName

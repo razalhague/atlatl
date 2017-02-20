@@ -13,6 +13,7 @@
 		{
 			"name": "Games",
 			"dailyMinutes": 60,
+			"trackContinuousUse": true,
 			"forbiddenTimes": [
 				{ "start": "03:00", "end": "12:00" }
 			],

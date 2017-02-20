@@ -22,7 +22,7 @@ package org.penny_craal.atlatl
 
 import java.time.LocalTime
 
-class AppGroup(val name: String, val dailyMinutes: Option[Double], val forbiddenTimes: Seq[TimeRange], val processNames: Seq[String]) {
+class AppGroup(val name: String, val dailyMinutes: Option[Double], val trackContinuousUse: Boolean, val forbiddenTimes: Seq[TimeRange], val processNames: Seq[String]) {
   if (dailyMinutes.isEmpty && forbiddenTimes.isEmpty) {
     throw new IllegalArgumentException("An app group must define either a daily time limit or a forbidden time range")
   }
