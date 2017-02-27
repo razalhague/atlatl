@@ -167,16 +167,13 @@ class Atlatl extends Actor with ActorLogging {
       }
       val forbiddenTimes =
         if (appGroups(groupName).forbiddenTimes.nonEmpty)
-          "forbidden at [" + separateNonEmpties(", ", appGroups(groupName).forbiddenTimes map (_.toString): _*) + "]"
+          appGroups(groupName).forbiddenTimes.mkString("forbidden at [", ", ", "]")
         else
           ""
-      groupName + ": " + separateNonEmpties(", ", dailyAllowance, forbiddenTimes)
+      (Seq(dailyAllowance, forbiddenTimes) filter (_.nonEmpty)).mkString(groupName + ": ", ", ", "")
     }
-    separateNonEmpties("\n", suspensions ++ groupDescriptions: _*)
+    suspensions ++ groupDescriptions filter (_.nonEmpty) mkString "\n"
   }
-
-  private def separateNonEmpties(separator: String, strings: String*) =
-    strings filter (_.nonEmpty) reduce (_ + separator + _)
 
   private def shouldKillGroupAt(groupName: String, time: LocalTime, spentMinutes: Double): Boolean =
     !suspensionInEffectAt(time) &&
