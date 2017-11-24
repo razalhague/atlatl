@@ -40,15 +40,13 @@ class Config private (
     val continuousUseAlarmMinutes: Double,
     val dailyResetTime: LocalTime
   ) {
-  for (appGroup <- appGroups; ft <- appGroup.forbiddenTimes if ft.lengthMinutes < alarmThresholdMinutes) {
-    throw new IllegalArgumentException("Forbidden time ranges must be longer than the alarm threshold")
-  }
-  if (appGroups.isEmpty) {
-    throw new IllegalArgumentException("At least one app group must be defined")
-  }
-  if (refreshMinutes <= 0) {
-    throw new IllegalArgumentException("Refresh period must be positive")
-  }
+  require(
+    appGroups forall (_.forbiddenTimes forall (_.lengthMinutes > alarmThresholdMinutes)),
+    "Forbidden time ranges must be longer than the alarm threshold"
+  )
+  require(appGroups.nonEmpty, "At least one app group must be defined")
+  require(refreshMinutes > 0, "Refresh period must be positive")
+  require(appGroups.map(_.name).distinct.size == appGroups.size, "No two app groups may share a name")
 }
 
 object Config {
