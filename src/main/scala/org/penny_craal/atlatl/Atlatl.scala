@@ -23,16 +23,18 @@ package org.penny_craal.atlatl
 import java.time.{LocalDateTime, LocalTime}
 import javax.sound.sampled.{AudioSystem, Clip}
 
-import akka.actor.{Actor, ActorLogging, ActorSystem, Props, ReceiveTimeout}
+import akka.actor.{Actor, ActorLogging, ActorSystem, Cancellable, Props}
 import akka.pattern.ask
 import akka.util.Timeout
 import better.files.File
 import org.jutils.jprocesses.JProcesses
 import org.jutils.jprocesses.model.ProcessInfo
+import org.penny_craal.atlatl.Helpers._
 
 import scala.collection.JavaConverters._
-import scala.concurrent.Await
 import scala.concurrent.duration._
+import scala.util.{Failure, Success}
+
 
 /**
   * @author Ville Jokela
@@ -42,165 +44,141 @@ object Atlatl extends App {
   system.actorOf(Props[Atlatl], "atlatl")
 }
 
-case object Tick
+case object Refresh
 
-case class GroupRuntimeInformation(name: String, spentMinutes: Double, continuousUseMinutes: Double)
+case class GroupRuntimeInformation(name: String, spentMinutes: Double, continuousUseMinutes: Double) {
+  def descriptionString(appGroup: AppGroup): String = {
+    val dailyAllowance = appGroup.dailyMinutes map (m => (m - spentMinutes).minutesToTimeString + " left")
+    val forbiddenTimes =
+      if (appGroup.forbiddenTimes.nonEmpty) Some(appGroup.forbiddenTimes.mkString("forbidden at [", ", ", "]"))
+      else None
+    (dailyAllowance ++ forbiddenTimes).mkString(appGroup.name + ": ", ", ", "")
+  }
+}
 
 class Atlatl extends Actor with ActorLogging {
   val configFileName = "config.json"
 
   private val conf = Config.parse(File(configFileName).contentAsString)
   /** Maps filename to Clip */
-  private val sounds = setupAudioSystem(List(conf.continuousUseAlarmSoundFilename, conf.killAlarmSoundFilename, conf.killSoundFilename))
+  private val sounds = setupAudioSystem(conf.soundFiles)
   private val trayActor =
-    if (TrayActor.isSupported)
-      Some(context.actorOf(Props(classOf[TrayActor], conf), "trayActor"))
-    else
-      None
+    if (TrayActor.isSupported) Some(context.actorOf(Props(classOf[TrayActor], conf), "trayActor"))
+    else None
   private val persistenceActor = context.actorOf(Props(classOf[PersistenceActor], conf), "persistenceActor")
 
-  private val appGroups = (conf.appGroups map (appGroup => (appGroup.name, appGroup))).toMap
+  private val appGroups = conf.appGroups.map(ag => ag.name -> ag).toMap
 
   private var terminating = false
-  private var prevGroupTimes = loadGroupTimes()
-  private var prevRefreshTime = LocalTime.now()
-  private var prevApps = Seq[ProcessInfo]()
   private var suspendedTimeRanges = Seq[TimeRange]()
+  private var prevSnapshot: Snapshot = _  // this will never be referenced before being defined
+  private var refreshTick: Option[Cancellable] = None
 
+  implicit val timeout: Timeout = Timeout(1.minute)
   import context.dispatcher
-  private val tick = context.system.scheduler.schedule(1.milli, (conf.refreshMinutes * 60 * 1000).toLong.millis, self, Tick)
-
-  override def receive: Receive = {
-    case Suspend =>
-      log.info("suspension engaged")
-      val currentTime = LocalTime.now()
-      suspendedTimeRanges = suspendedTimeRanges :+ new TimeRange(
-        currentTime.plusMinutes(conf.suspensionDelayMinutes),
-        currentTime.plusMinutes(conf.suspensionDurationMinutes + conf.suspensionDelayMinutes)
-      )
-    case Exit =>
-      log.info("exiting...")
-      terminating = true
-      context.system.terminate()
-    case Tick =>
-      log.info("tick")
-      val apps = for {
-        appGroup <- conf.appGroups
-        pi <- fetchRunningProcesses() if appGroup.processNames contains pi.getName
-      } yield pi
-      val refreshDateTime = LocalDateTime.now()
-      val refreshTime = refreshDateTime.toLocalTime
-      val refreshTimeRange = new TimeRange(prevRefreshTime, refreshTime) // assumes that the refresh takes less than a day
-      suspendedTimeRanges = suspendedTimeRanges filter (suspension =>
-        suspension.contains(refreshTime) || suspension.contains(refreshTime.plusMinutes(conf.suspensionDelayMinutes))
-      )
-      def anyAppsRunningFromGroup(groupName: String) =
-        apps exists (appGroups(groupName).processNames contains _.getName)
-      def updatedContinuousUse(groupName: String, continuousUseMinutes: Double) = {
-        if ((prevApps map (_.getName) intersect (apps map (_.getName)) intersect appGroups(groupName).processNames).nonEmpty)
-          if (continuousUseMinutes == 0.0)
-            // this is the first time after a reset that this process is found in both apps and prevApps
-            // it must have been running for two refresh intervals for this to happen
-            refreshTimeRange.lengthMinutes * 2
-          else
-            if (continuousUseMinutes < conf.continuousUseAlarmMinutes)
-              continuousUseMinutes + refreshTimeRange.lengthMinutes
-            else
-              // we'll have warned of continuous use last refresh, so reduce the amount of time by the alarm interval
-              continuousUseMinutes - conf.continuousUseAlarmMinutes + refreshTimeRange.lengthMinutes
-        else
-          0.0
-      }
-      val groupTimes =
-        if (refreshTimeRange.contains(conf.dailyResetTime))
-          prevGroupTimes map (gri => GroupRuntimeInformation(gri.name, 0.0, gri.continuousUseMinutes))
-        else
-          for (GroupRuntimeInformation(groupName, spentMinutes, continuousUseMinutes) <- prevGroupTimes)
-            yield GroupRuntimeInformation(
-              groupName,
-              if (anyAppsRunningFromGroup(groupName)) spentMinutes + refreshTimeRange.lengthMinutes else spentMinutes,
-              updatedContinuousUse(groupName, continuousUseMinutes)
-            )
-      val alarmTime = refreshTime.plusMinutes(conf.alarmThresholdMinutes)
-      val shouldKillAlarm =
-        groupTimes exists { case GroupRuntimeInformation(groupName, spentMinutes, _) =>
-          anyAppsRunningFromGroup(groupName) &&
-            shouldKillGroupAt(groupName, alarmTime, spentMinutes + conf.alarmThresholdMinutes) && // should be killed in $alarmThresholdMinutes
-            !shouldKillGroupAt(groupName, refreshTime, spentMinutes) // but should not be killed right now
-        }
-      val shouldContinuousUseAlarm =
-        groupTimes exists (gri => appGroups(gri.name).trackContinuousUse && gri.continuousUseMinutes >= conf.continuousUseAlarmMinutes)
-      val toBeKilled = for {
-        GroupRuntimeInformation(groupName, spentMinutes, _) <- groupTimes if shouldKillGroupAt(groupName, refreshTime, spentMinutes)
-        pi <- apps if appGroups(groupName).processNames contains pi.getName
-      } yield pi.getPid.toInt
-      trayActor foreach (_ ! UpdateToolTip(trayTooltip(groupTimes, refreshTime)))
-      if (shouldKillAlarm) {
-        playSound(conf.killAlarmSoundFilename)
-      }
-      if (shouldContinuousUseAlarm) {
-        playSound(conf.continuousUseAlarmSoundFilename)
-      }
-      if (toBeKilled.nonEmpty) {
-        playSound(conf.killSoundFilename)
-      }
-      toBeKilled foreach JProcesses.killProcess
-      prevRefreshTime = refreshTime
-      prevGroupTimes = groupTimes
-      prevApps = apps
-      persistenceActor ! SaveGroupTimes(groupTimes, refreshDateTime)
+  trayActor foreach (_ ! UpdateToolTip("Loading data..."))
+  persistenceActor ? LoadGroupTimes onComplete {
+    case Success(savedGroupTimes) =>
+      val now = LocalDateTime.now()
+      val groupTimes = verifyGroupTimes(savedGroupTimes, now)
+      prevSnapshot = StrippedSnapshot(appGroups, conf, groupTimes, now.plusMinutes(-conf.refreshMinutes))
+      val refreshDelayMillis = (conf.refreshMinutes * 60 * 1000).toLong.millis
+      refreshTick = Some(context.system.scheduler.schedule(1.milli, refreshDelayMillis, self, Refresh))
+    case Failure(throwable) =>
+      log.error(throwable, "error while loading state from disk")
+      exit()
   }
 
-  private def trayTooltip(groupTimes: Seq[GroupRuntimeInformation], now: LocalTime) = {
-    val suspensions = suspendedTimeRanges map (suspensionRange =>
-      "suspension: " + (
-        if (!suspensionRange.contains(now))
-          minutesToTimeString(suspensionRange.lengthMinutes) + " starts in " + minutesToTimeString(now until suspensionRange.start)
-        else
-          minutesToTimeString(now until suspensionRange.end) + " left"
-      )
+  override def receive: Receive = {
+    case Refresh => refresh()
+    case Suspend => suspend()
+    case Exit => exit()
+  }
+
+  private def refresh(): Unit = {
+    log.info("refresh")
+    val processes = fetchRunningProcesses()
+    // a map from process name to list of process IDs
+    val pIdsByName = processes groupBy (_.getName) mapValues (_ map (_.getPid.toInt))
+    val snapshot = FullSnapshot(prevSnapshot, processes map (_.getName), LocalDateTime.now())
+    // filters out suspensions that are not pertinent
+    suspendedTimeRanges = suspendedTimeRanges filter (suspension =>
+      suspension.contains(snapshot.refreshTime) ||
+        suspension.contains(snapshot.refreshTime.plusMinutes(conf.suspensionDelayMinutes))
     )
-    val groupDescriptions = groupTimes map { case GroupRuntimeInformation(groupName, spentMinutes, _) =>
-      val dailyAllowance = appGroups(groupName).dailyMinutes match {
-        case Some(allowedMinutes) => minutesToTimeString(allowedMinutes - spentMinutes) + " left"
-        case None => ""
-      }
-      val forbiddenTimes =
-        if (appGroups(groupName).forbiddenTimes.nonEmpty)
-          appGroups(groupName).forbiddenTimes.mkString("forbidden at [", ", ", "]")
-        else
-          ""
-      (Seq(dailyAllowance, forbiddenTimes) filter (_.nonEmpty)).mkString(groupName + ": ", ", ", "")
+    val alarmTime = snapshot.refreshTime.plusMinutes(conf.alarmThresholdMinutes)
+    // checks if any group exists that should be killed in $alarmThresholdMinutes, but should not be killed right now
+    val shouldPlayKillAlarm = snapshot.groupTimes exists (gri =>
+      snapshot.anyAppsRunningFromGroup(gri.name) &&
+        shouldKillGroupAt(appGroups(gri.name), alarmTime, gri.spentMinutes + conf.alarmThresholdMinutes) &&
+        !shouldKillGroupAt(appGroups(gri.name), snapshot.refreshTime, gri.spentMinutes)
+      )
+    val pIdsToBeKilled = for {
+      GroupRuntimeInformation(groupName, spentMinutes, _) <- snapshot.groupTimes
+      if shouldKillGroupAt(appGroups(groupName), snapshot.refreshTime, spentMinutes)
+      pName <- snapshot.runningTrackedApps if snapshot.appGroups(groupName).processNames contains pName
+      pId <- pIdsByName(pName)
+    } yield pId
+
+    trayActor foreach (_ ! UpdateToolTip(trayTooltip(snapshot)))
+    if (shouldPlayKillAlarm) {
+      playSound(conf.killAlarmSoundFilename)
     }
+    if (snapshot.anyAppsReachedContinuousUseThreshold) {
+      playSound(conf.continuousUseAlarmSoundFilename)
+    }
+    if (pIdsToBeKilled.nonEmpty) {
+      playSound(conf.killSoundFilename)
+    }
+    pIdsToBeKilled foreach JProcesses.killProcess
+    prevSnapshot = snapshot.strippedOfHistory
+    persistenceActor ! SaveGroupTimes(snapshot.groupTimes, snapshot.refreshDateTime)
+  }
+
+  private def suspend(): Unit = {
+    val currentTime = LocalTime.now()
+    log.info(s"suspension engaged at $currentTime")
+    suspendedTimeRanges = suspendedTimeRanges :+ TimeRange(
+      currentTime.plusMinutes(conf.suspensionDelayMinutes),
+      currentTime.plusMinutes(conf.suspensionDurationMinutes + conf.suspensionDelayMinutes)
+    )
+  }
+
+  private def exit(): Unit = {
+    log.info("exiting...")
+    terminating = true
+    context.system.terminate()
+  }
+
+  private def trayTooltip(snapshot: Snapshot) = {
+    def suspensionDescriptionString(timeRange: TimeRange) = {
+      val desc =
+        if (!timeRange.contains(snapshot.refreshTime)) {
+          val susLength = timeRange.lengthMinutes.minutesToTimeString
+          val susDelay = (snapshot.refreshTime until timeRange.start).minutesToTimeString
+          s"$susLength starts in $susDelay"
+        } else (snapshot.refreshTime until timeRange.end).minutesToTimeString + " left"
+      s"suspension: $desc"
+    }
+    val suspensions = suspendedTimeRanges map suspensionDescriptionString
+    val groupDescriptions = snapshot.groupTimes map (gri => gri.descriptionString(snapshot.appGroups(gri.name)))
     suspensions ++ groupDescriptions filter (_.nonEmpty) mkString "\n"
   }
 
-  private def shouldKillGroupAt(groupName: String, time: LocalTime, spentMinutes: Double): Boolean =
-    !suspensionInEffectAt(time) &&
-      appGroups(groupName).shouldBeKilled(spentMinutes, time)
+  private def shouldKillGroupAt(appGroup: AppGroup, time: LocalTime, spentMinutes: Double): Boolean =
+    !suspensionInEffectAt(time) && appGroup.shouldBeKilled(spentMinutes, time)
 
   private def suspensionInEffectAt(time: LocalTime): Boolean =
     suspendedTimeRanges exists (_.contains(time))
 
-  private def minutesToTimeString(minutes: Double): String = {
-    if (Math.abs(minutes) > 120)
-      f"${(minutes / 60).floor}%1.0f h"
-    else if (Math.abs(minutes) > 2)
-      f"${minutes.floor}%1.0f m"
-    else // less than two minutes left
-      f"${(minutes * 60).floor}%1.0f s"
-  }
-
   private def fetchRunningProcesses(): Seq[ProcessInfo] = {
-    JProcesses.getProcessList.asScala
+    JProcesses.getProcessList().asScala
   }
 
   private def setupAudioSystem(soundFileNames: Seq[String]): Map[String, Clip] = {
-    (soundFileNames map { sfn =>
-      val clip = AudioSystem.getClip()
-      clip.open(AudioSystem.getAudioInputStream(File(sfn).uri.toURL))
-      (sfn, clip)
-    }).toMap
+    val sounds = soundFileNames.map(_ -> AudioSystem.getClip()).toMap
+    sounds foreach { case (sfn, clip) => clip.open(AudioSystem.getAudioInputStream(File(sfn).uri.toURL)) }
+    sounds
   }
 
   private def playSound(soundFileName: String): Unit = {
@@ -211,26 +189,16 @@ class Atlatl extends Actor with ActorLogging {
     sounds(soundFileName).start()
   }
 
-  private def loadGroupTimes(): Seq[GroupRuntimeInformation] = {
-    implicit val timeout: Timeout = Timeout(1.minute)
-    lazy val emptyGroupTimes = conf.appGroups map (appGroup => GroupRuntimeInformation(appGroup.name, 0.0, 0.0))
-    trayActor foreach (_ ! UpdateToolTip("Loading data..."))
-    val future = persistenceActor ? LoadGroupTimes
-    Await.result(future, timeout.duration) match {
-      case Some((saveTime: LocalDateTime, groupTimes: Seq[GroupRuntimeInformation])) =>
-        if (dataValidAt(saveTime, LocalDateTime.now()))
-          // construct the new groupTimes list from the configuration file in case it has been changed since the last
-          // save, and the loaded groupTimes is either missing appGroups or has old appGroups that are no longer in
-          // the configuration
-          conf.appGroups map (appGroup => GroupRuntimeInformation(
-            appGroup.name,
-            groupTimes find (_.name == appGroup.name) map (_.spentMinutes) getOrElse 0.0,
-            0.0
-          ))
-        else // data is outdated
-          emptyGroupTimes
-      case None => emptyGroupTimes
-    }
+
+  private def verifyGroupTimes(savedGroupTimes: Any, now: LocalDateTime) = savedGroupTimes match {
+    case Some((saveTime: LocalDateTime, groupTimes: Seq[GroupRuntimeInformation]))
+    if dataValidAt(saveTime, now) =>
+      conf.appGroups map (appGroup => GroupRuntimeInformation(
+        appGroup.name,
+        groupTimes find (_.name == appGroup.name) map (_.spentMinutes) getOrElse 0.0,
+        0.0
+      ))
+    case _ => conf.appGroups map (appGroup => GroupRuntimeInformation(appGroup.name, 0.0, 0.0))
   }
 
   private def dataValidAt(saveTime: LocalDateTime, referenceTime: LocalDateTime): Boolean = {
@@ -243,21 +211,12 @@ class Atlatl extends Actor with ActorLogging {
   }
 
   override def postStop(): Unit = {
-    tick.cancel()
+    refreshTick foreach { _.cancel() }
     sounds.values foreach { _.close() }
     // the sound system leaves a thread alive that I cannot figure out how to terminate, which will leave the actor-
     // system hanging in certain situations, so let's terminate the whole program here
     if (terminating) {
       sys.exit()
     }
-  }
-
-  // doing these manually every time got too error-prone and verbose
-  implicit class LocalTimeHelper(x: LocalTime) {
-    def plusMinutes(minutes: Double): LocalTime =
-      x.plus(java.time.Duration.ofMillis((minutes * 60 * 1000).toLong))
-
-    def until(lt: LocalTime): Double =
-      new TimeRange(x, lt).lengthMinutes
   }
 }

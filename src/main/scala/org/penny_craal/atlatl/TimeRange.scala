@@ -28,7 +28,7 @@ import java.time.temporal.ChronoUnit
   * @param start beginning of the range (inclusive)
   * @param end end of the range (exclusive)
   */
-class TimeRange(val start: LocalTime, val end: LocalTime) {
+case class TimeRange(start: LocalTime, end: LocalTime) {
   def contains(time: LocalTime): Boolean = {
     if (start.isAfter(end))
       time.isAfter(start) || time.isBefore(end) || time == start
@@ -42,6 +42,5 @@ class TimeRange(val start: LocalTime, val end: LocalTime) {
     else
       start.until(end, ChronoUnit.MILLIS).toDouble / 60000
 
-  override def toString: String =
-    start.toString + "-" + end.toString
+  override def toString: String = start.toString + "-" + end.toString
 }

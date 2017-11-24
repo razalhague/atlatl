@@ -20,6 +20,7 @@
 
 package org.penny_craal.atlatl
 
+import java.io.{PrintWriter, StringWriter}
 import javax.swing.JOptionPane
 
 import akka.actor.SupervisorStrategy.Escalate
@@ -31,13 +32,9 @@ import akka.actor.{OneForOneStrategy, SupervisorStrategy, SupervisorStrategyConf
 class AtlatlSsc extends SupervisorStrategyConfigurator {
   override def create(): SupervisorStrategy = OneForOneStrategy() {
     case e: Exception =>
-      def throwableToStringWithCause(t: Throwable): String = {
-        if (t.getCause != null)
-          t.toString + "\n" + throwableToStringWithCause(t.getCause)
-        else
-          t.toString
-      }
-      JOptionPane.showMessageDialog(null, throwableToStringWithCause(e), "Error", JOptionPane.ERROR_MESSAGE)
+      val sw = new StringWriter()
+      e.printStackTrace(new PrintWriter(sw))
+      JOptionPane.showMessageDialog(null, sw.toString, "Error", JOptionPane.ERROR_MESSAGE)
       Escalate
   }
 }

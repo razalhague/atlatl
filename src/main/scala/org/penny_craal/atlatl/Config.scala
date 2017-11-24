@@ -47,6 +47,8 @@ class Config private (
   require(appGroups.nonEmpty, "At least one app group must be defined")
   require(refreshMinutes > 0, "Refresh period must be positive")
   require(appGroups.map(_.name).distinct.size == appGroups.size, "No two app groups may share a name")
+
+  val soundFiles = List(killSoundFilename, killAlarmSoundFilename, continuousUseAlarmSoundFilename)
 }
 
 object Config {
@@ -102,7 +104,7 @@ object Config {
   private def parseForbiddenTimes(jsonAppGroup: JSONObject): Seq[TimeRange] = {
     if (jsonAppGroup.containsKey(forbiddenTimes))
       (asScalaIterator(jsonAppGroup.getValue[JSONArray](forbiddenTimes).iterator()) map (_.asInstanceOf[JSONObject]) map (forbiddenTime =>
-        new TimeRange(
+        TimeRange(
           LocalTime.parse(forbiddenTime.getValue[String](forbiddenTimeStart)),
           LocalTime.parse(forbiddenTime.getValue[String](forbiddenTimeEnd))
         )
@@ -120,13 +122,10 @@ object Config {
   }
 
   implicit class JsonObjectHelper(jsonObject: JSONObject) {
-    def getValue[V](key: String): V =
-      jsonObject.get(key).asInstanceOf[V]
+    def getValue[V](key: String): V = jsonObject.get(key).asInstanceOf[V]
 
     def getOptional[V](key: String): Option[V] =
-      if (jsonObject.containsKey(key))
-        Some(jsonObject.getValue[V](key))
-      else
-        None
+      if (jsonObject.containsKey(key)) Some(jsonObject.getValue[V](key))
+      else None
   }
 }

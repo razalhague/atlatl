@@ -27,6 +27,8 @@ import javax.swing.{ImageIcon, JOptionPane, SwingUtilities}
 
 import akka.actor.{Actor, ActorLogging}
 
+import scala.concurrent.Future
+
 case class UpdateToolTip(tooltip: String)
 case object Exit
 case object Suspend
@@ -44,7 +46,7 @@ class TrayActor(private val conf: Config) extends Actor with ActorLogging {
 
   private val iconFile = ImageIO.read(getClass.getResource("/" + trayIconFileName))
   private val icon = new ImageIcon(iconFile)
-  private val trayIcon: TrayIcon = new TrayIcon(iconFile)
+  private val trayIcon = new TrayIcon(iconFile)
 
   SwingUtilities.invokeLater(() => {
     trayIcon.setPopupMenu(makePopupMenu())
@@ -69,22 +71,27 @@ class TrayActor(private val conf: Config) extends Actor with ActorLogging {
     popup
   }
 
-  private def displayAboutDialog() = {
-    val aboutMsg =
-      "Atlatl, The Loud Application Time Limiter\n" +
-      "Copyright (C) 2016, 2017  Ville Jokela\n\n" +
-      "This program is free software: you can redistribute it and/or modify\n" +
-      "it under the terms of the GNU General Public License as published by\n" +
-      "the Free Software Foundation, either version 3 of the License, or\n" +
-      "(at your option) any later version.\n\n" +
-      "This program is distributed in the hope that it will be useful,\n" +
-      "but WITHOUT ANY WARRANTY; without even the implied warranty of\n" +
-      "MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the\n" +
-      "GNU General Public License for more details.\n\n" +
-      "You should have received a copy of the GNU General Public License\n" +
-      "along with this program.  If not, see <http://www.gnu.org/licenses/>."
-    // JOptionPane.showMessageDialog() blocks until the user clicks ok, so let's execute it in a separate thread.
-    new Thread(() => JOptionPane.showMessageDialog(null, aboutMsg, "About atlatl", JOptionPane.INFORMATION_MESSAGE, icon)).start()
+  private def displayAboutDialog(): Unit = {
+    val aboutMessage =
+      """Atlatl, The Loud Application Time Limiter
+        |Copyright (C) 2016, 2017  Ville Jokela
+        |
+        |This program is free software: you can redistribute it and/or modify
+        |it under the terms of the GNU General Public License as published by
+        |the Free Software Foundation, either version 3 of the License, or
+        |(at your option) any later version.
+        |
+        |This program is distributed in the hope that it will be useful,
+        |but WITHOUT ANY WARRANTY; without even the implied warranty of
+        |MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+        |GNU General Public License for more details
+        |
+        |You should have received a copy of the GNU General Public License
+        |along with this program.  If not, see <http://www.gnu.org/licenses/>.
+      """.stripMargin
+    // JOptionPane.showMessageDialog() blocks until the user clicks ok, so let's not execute it in this thread
+    import context.dispatcher
+    Future { JOptionPane.showMessageDialog(null, aboutMessage, "About atlatl", JOptionPane.INFORMATION_MESSAGE, icon) }
   }
 
   override def receive: Receive = {
